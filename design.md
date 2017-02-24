@@ -34,3 +34,45 @@ Deploy system consists of 3 components:
 - **deploy-registry**: this is a program running as a network service, it stores uploaded blobs and keeps track of all necessary metadata, configurations made, etc.;
 - **deployctl**: this program is used by operators/scripts to interact with deploy-registry: create new components/versions, upload blobs, changing configurations;
 - **deploy-agent**: this program is running on servers and tracks configuration of interest at deploy-registry; once configuration is updated, deploy-agent downloads missing layers to local cache, unpacks data to a new directory and runs a user-provided callback script which does necessary service restarts, notifications, etc.
+
+## Examples of deployctl usage
+
+Show known components:
+
+	deployctl showcomp
+
+Show known component versions:
+
+	deployctl showcomp <component>
+
+Upload new component version (components are created as necessary):
+
+	deployctl addver <component:version> /path/to/file.tar.gz
+
+Delete existing component version:
+
+	deployctl delver <component:version>
+
+Add new configuration — ordered layers (particular versions of different components):
+
+	deployctl addconf <configuration> <component:version> [<component:version>...]
+
+Change version of a single layer in existing configuration:
+
+	deployctl changeconf <configuration> <component:version>
+
+Change single layer in existing confguration to its most recent uploaded version:
+
+	deployctl bumpconf <configuration> <component>
+
+Replace existing configuration:
+
+	deployctl replaceconf <configuration> <component:version> [<component:version>...]
+
+Delete existing configuration:
+
+	deployctl delconf <configuration>
+
+Show configuration:
+
+	deployctl showconf <configuration>
