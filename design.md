@@ -4,10 +4,11 @@ General overview: *configuration* corresponds to some project you'd want to depl
 
 So, your project layout in this system may look like this:
 
-	myProject (configuration):
-		- (layer) codebase (component) @ (version) 123
-		- (layer) configs (component) @ (version) v2
-		- (layer) dataset (component) @ (version) xyz
+	configurations:
+		myProject:
+			- (layer) codebase (component) @ (version) 123
+			- (layer) configs (component) @ (version) v2
+			- (layer) dataset (component) @ (version) xyz
 	
 	components:
 		codebase:
