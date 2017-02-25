@@ -76,3 +76,37 @@ Delete existing configuration:
 Show configuration:
 
 	deployctl showconf <configuration>
+
+## Implementation details
+
+Server (deploy-registry) uses SSH as its network protocol, reasons are following:
+
+- built-in security & authentication;
+- low key management overhead: operators already have ssh keys, keys can be added to (removed from) the system in a straightforward way (separate `authorized_keys` file);
+- proper implementation would allow additional interface that could be managed with standard sftp/ssh commands w/o the need for deployctl;
+
+### Interactions between deploy-registry and deployctl
+
+File uploads are done using sftp subsystem, commands are executed using "regular" ssh subsystem. This would allow using this without deployctl at all if required, only using standard sftp/ssh commands.
+
+Caveats: there should be a separate explicit step to submit hash of uploaded file to ensure it's been uploaded completely. How should uploaded file be tied to commands executed? Probably could be some auto-generated temporary name with following graceful period: client uploaded file is expected to issue command(s) referencing this file by its temporary name during grace period, otherwise uploaded file gets deleted.
+
+Alternative: make it possible to reference file using hash scheme: i.e. in addition to `deployctl addver <component:version> /path/to/file.tar.gz` call make it possible to do `deployctl addver <component:version> sha256:...` which would reference previously uploaded file. In this case "manual" sftp/ssh workflow can be done like this:
+
+	$ echo put file.tar.gz /tmp/upload | sftp registry.host
+
+Server automatically calculates content hash as file is saved (**TODO**: check whether this is possible, since hashing works over io.Writer and [handling file saving requires io.WriterAt](https://godoc.org/github.com/pkg/sftp#FileWriter)).
+
+	$ ssh registry.host deployctl addver component:version /tmp/upload
+
+Here `/tmp/upload` is a temporary name valid only for current ssh session, so it can be any arbitrary name — server matches this name to real on-disk temporary file. Caveat: as this name is only valid during session, sftp call to upload file and following ssh call should be done over single ssh session, which is problematic when not using ssh master channels (they're *not* enabled by default).
+
+As a workaround, client may reference uploaded file by its hash:
+
+	$ ssh registry.host deployctl addver component:version sha256:${FILEHASH}
+
+If provided hash matches one of uploaded file, it is moved to permanent location and new record is made. If provided hash matches one of the already tracked files, new record is made and temporary uploaded file is left untouched. If nothing matches provided hash, error is returned. Leftover temporary files are automatically removed after grace period.
+
+### Interactions between deploy-registry and deploy-agent
+
+Program deploy-agent would suffice sftp subsystem access only, as it only needs to fetch configuration metadata which can be represented as a virtual file, and corresponding data files can be fetched directly from disk.
