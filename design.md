@@ -95,11 +95,11 @@ Alternative: make it possible to reference file using hash scheme: i.e. in addit
 
 	$ echo put file.tar.gz /tmp/upload | sftp registry.host
 
-Server automatically calculates content hash as file is saved (**TODO**: check whether this is possible, since hashing works over io.Writer and [handling file saving requires io.WriterAt](https://godoc.org/github.com/pkg/sftp#FileWriter)).
+Server automatically calculates content hash after file is completely written to disk.
 
 	$ ssh registry.host deployctl addver component:version /tmp/upload
 
-Here `/tmp/upload` is a temporary name valid only for current ssh session, so it can be any arbitrary name — server matches this name to real on-disk temporary file. Caveat: as this name is only valid during session, sftp call to upload file and following ssh call should be done over single ssh session, which is problematic when not using ssh master channels (they're *not* enabled by default).
+Here `/tmp/upload` is a temporary name valid only for current ssh session, so it can be any arbitrary name — server matches this name to real on-disk temporary file. **Caveat**: as this name is only valid during session, sftp call to upload file and following ssh call should be done over single ssh session, which is problematic when not using ssh master channels (they're *not* enabled by default).
 
 As a workaround, client may reference uploaded file by its hash:
 
