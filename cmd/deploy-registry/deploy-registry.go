@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -16,6 +20,7 @@ import (
 	"github.com/artyom/deploy-tools/cmd/deploy-registry/internal/internals"
 	"github.com/boltdb/bolt"
 	"github.com/pkg/errors"
+	"github.com/pkg/sftp"
 )
 
 func main() {
@@ -55,6 +60,11 @@ func run(args runConf) error {
 		return err
 	}
 	log.Println("host key fingerprint:", ssh.FingerprintSHA256(hostKey.PublicKey()))
+	tr, err := newTracker(filepath.Join(args.Dir, "state.db"), args.Dir)
+	if err != nil {
+		return err
+	}
+	defer tr.Close()
 
 	ln, err := net.Listen("tcp", args.Addr)
 	if err != nil {
@@ -68,21 +78,133 @@ func run(args runConf) error {
 		}
 		go func(conn net.Conn) {
 			_ = conn.SetDeadline(time.Now().Add(time.Minute)) // TODO
-			if err := serveConn(conn, config); err != nil {
-				log.Println(err)
+			if err := serveConn(conn, config, tr); err != nil {
+				log.Printf("%+v", err)
 			}
 		}(conn)
 	}
 }
 
-func serveConn(conn net.Conn, config *ssh.ServerConfig) error {
+func serveConn(conn net.Conn, config *ssh.ServerConfig, tr *tracker) error {
 	defer conn.Close()
+	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer sconn.Close()
+	go ssh.DiscardRequests(reqs)
+	isServiceUser := internals.IsServiceUser(sconn.Permissions)
+	for newChannel := range chans {
+		if newChannel.ChannelType() != "session" {
+			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			continue
+		}
+		channel, requests, err := newChannel.Accept()
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		switch {
+		case isServiceUser:
+			go handleServiceSession(channel, requests, tr)
+		default:
+			go handleOperatorSession(channel, requests, tr)
+		}
+	}
 	return nil
 }
 
-type tracker struct {
-	db *bolt.DB
+func handleServiceSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *tracker) {
+	for req := range requests {
+		if !isSftpRequest(req) {
+			req.Reply(false, nil)
+			continue
+		}
+		go func() {
+			defer sshCh.Close() // SSH_MSG_CHANNEL_CLOSE
+			s := internals.NewDownloadServer(sshCh, tr.fileInfoFunc, tr.fileReadFunc)
+			_ = s.Serve()
+		}()
+		req.Reply(true, nil)
+	}
 }
+
+func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *tracker) {
+	for req := range requests {
+		var ok bool
+		switch {
+		case req.Type == "pty-req":
+			req.Reply(true, nil)
+			continue
+		case req.Type == "shell":
+			ok = true
+			go func() {
+				defer sshCh.Close()      // SSH_MSG_CHANNEL_CLOSE
+				defer sshCh.CloseWrite() // SSH_MSG_CHANNEL_EOF
+				defer sshCh.SendRequest("eow@openssh.com", false, nil)
+				switch err := serveTerminal(sshCh); err {
+				case nil:
+					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{0}))
+				default:
+					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{1}))
+				}
+			}()
+		case isSftpRequest(req):
+			ok = true
+			go func() {
+				defer sshCh.Close() // SSH_MSG_CHANNEL_CLOSE
+				s := internals.NewUploadServer(sshCh,
+					filepath.Join(tr.dir, uploadDir),
+					tr.uploadCallback)
+				_ = s.Serve()
+			}()
+		}
+		req.Reply(ok, nil)
+		if ok {
+			break
+		}
+	}
+	for req := range requests {
+		req.Reply(false, nil)
+	}
+}
+
+type tracker struct {
+	db  *bolt.DB
+	dir string // root directory which holds "files" and "uploads" subdirectories
+
+	mu sync.Mutex
+	// uploads holds mapping of uploaded file hash to its full (temporary)
+	// name
+	uploads map[string]string
+}
+
+func (tr *tracker) uploadCallback(name, hash string) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	tr.uploads[hash] = name
+}
+
+func (tr *tracker) fileInfoFunc(r sftp.Request) ([]os.FileInfo, error) {
+	return nil, syscall.EPERM // TODO
+}
+
+func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
+	return nil, syscall.EPERM // TODO
+}
+
+func newTracker(name, dir string) (*tracker, error) {
+	db, err := bolt.Open(name, 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		return nil, err
+	}
+	return &tracker{
+		db:      db,
+		dir:     dir,
+		uploads: make(map[string]string),
+	}, nil
+}
+
+func (tr *tracker) Close() error { return tr.db.Close() }
 
 // saveKey saves provided value in a boltDB at given address. Address should
 // have at least 2 elements, as boltDB does not allow root bucket values. Last
@@ -184,4 +306,19 @@ func NewConfiguration(name string, layers ...ComponentVersion) (*Configuration, 
 		Hash:   fmt.Sprintf("%x", h.Sum(nil)),
 		Layers: layers,
 	}, nil
+}
+
+func serveTerminal(rw io.ReadWriter) error {
+	return errors.New("not implemented")
+}
+
+type exitStatusMsg struct {
+	Status uint32
+}
+
+func isSftpRequest(req *ssh.Request) bool {
+	if req == nil {
+		return false
+	}
+	return req.Type == "subsystem" && len(req.Payload) > 4 && string(req.Payload[4:]) == "sftp"
 }
