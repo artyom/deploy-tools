@@ -3,18 +3,22 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/cmd/deploy-registry/internal/internals"
@@ -50,8 +54,14 @@ type runConf struct {
 }
 
 const (
-	filesDir  = "files"
-	uploadDir = "uploads"
+	filesDir   = "files"
+	uploadDir  = "uploads"
+	hashPrefix = "sha256:"
+
+	bktByVersion  = "byVersion"
+	bktByTime     = "byTime"
+	bktComponents = "components"
+	bktConfigs    = "configs"
 )
 
 func run(args runConf) error {
@@ -77,7 +87,7 @@ func run(args runConf) error {
 			return err
 		}
 		go func(conn net.Conn) {
-			_ = conn.SetDeadline(time.Now().Add(time.Minute)) // TODO
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Minute)) // TODO
 			if err := serveConn(conn, config, tr); err != nil {
 				log.Printf("%+v", err)
 			}
@@ -141,7 +151,7 @@ func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *
 				defer sshCh.Close()      // SSH_MSG_CHANNEL_CLOSE
 				defer sshCh.CloseWrite() // SSH_MSG_CHANNEL_EOF
 				defer sshCh.SendRequest("eow@openssh.com", false, nil)
-				switch err := serveTerminal(sshCh); err {
+				switch err := serveTerminal(tr, sshCh); err {
 				case nil:
 					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{0}))
 				default:
@@ -176,6 +186,7 @@ type tracker struct {
 	// uploads holds mapping of uploaded file hash to its full (temporary)
 	// name
 	uploads map[string]string
+	st      *syscall.Stat_t // used to attach to virtual files
 }
 
 func (tr *tracker) uploadCallback(name, hash string) {
@@ -185,10 +196,88 @@ func (tr *tracker) uploadCallback(name, hash string) {
 }
 
 func (tr *tracker) fileInfoFunc(r sftp.Request) ([]os.FileInfo, error) {
+	switch r.Method {
+	case "List":
+		return tr.listDirs(r.Filepath)
+	case "Stat":
+		var out []os.FileInfo
+		st, err := tr.statPath(r.Filepath)
+		if st != nil {
+			out = []os.FileInfo{st}
+		}
+		return out, err
+	}
 	return nil, syscall.EPERM // TODO
 }
 
+func (tr *tracker) statPath(reqPath string) (os.FileInfo, error) {
+	reqPath = path.Clean(reqPath)
+	var hasMatch bool
+	for _, pat := range []string{"/", "/files", "/configs", "/files/?*", "/configs/?*.json"} {
+		if ok, _ := path.Match(pat, reqPath); ok {
+			hasMatch = true
+			break
+		}
+	}
+	if !hasMatch {
+		return nil, syscall.ENOENT
+	}
+	if reqPath == "/files" {
+		return os.Stat(filepath.Join(tr.dir, filesDir))
+	}
+	if path.Dir(reqPath) == "/files" {
+		return os.Stat(filepath.Join(tr.dir, filesDir, path.Base(reqPath)))
+	}
+	now := time.Now().UTC()
+	switch reqPath {
+	case "/":
+		return internals.NewFile("/", true, now, nil, tr.st), nil
+	case "/configs":
+		return internals.NewFile("configs", true, now, nil, tr.st), nil
+	}
+	if ok, err := path.Match("/configs/?*.json", reqPath); err != nil || !ok {
+		return nil, syscall.ENOENT
+	}
+	// the only case left unprocessed so far is "/configs/?*.json"
+	name := strings.TrimSuffix(path.Base(reqPath), ".json")
+	data, err := fetchKey(tr.db, "configs", name, "current")
+	if err != nil {
+		return nil, err
+	}
+	return internals.NewFile(path.Base(reqPath), false, now, data, tr.st), nil
+}
+
+func (tr *tracker) listDirs(reqPath string) ([]os.FileInfo, error) {
+	switch reqPath {
+	default:
+		return nil, syscall.EPERM
+	case "/files":
+		f, err := os.Open(filepath.Join(tr.dir, filesDir))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return f.Readdir(0)
+	case "/configs":
+		configs, err := fetchConfigs(tr.db)
+		if err != nil {
+			return nil, err
+		}
+		return configsVirtualFiles(configs, tr.st), nil
+	case "/":
+	}
+	statFiles, err := os.Stat(filepath.Join(tr.dir, filesDir))
+	if err != nil {
+		return nil, err
+	}
+	statConfigs := internals.NewFile("configs", true, statFiles.ModTime(), nil, tr.st)
+	return []os.FileInfo{statConfigs, statFiles}, nil
+}
+
 func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
+	// r.Filepath may match one of the following patterns:
+	// 1. "/configs/?*.json" — virtual file w/json dump of config
+	// 2. "/files/?*" — real file from disk
 	return nil, syscall.EPERM // TODO
 }
 
@@ -201,6 +290,7 @@ func newTracker(name, dir string) (*tracker, error) {
 		db:      db,
 		dir:     dir,
 		uploads: make(map[string]string),
+		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 	}, nil
 }
 
@@ -213,20 +303,38 @@ func saveKey(db *bolt.DB, value []byte, addr ...string) error {
 	if db == nil || len(value) == 0 || len(addr) < 2 {
 		return errors.New("invalid saveKey arguments")
 	}
-	val := make([]byte, len(value))
-	copy(val, value)
 	return db.Update(func(tx *bolt.Tx) error {
-		bkt, err := tx.CreateBucketIfNotExists([]byte(addr[0]))
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		for _, k := range addr[1 : len(addr)-1] {
-			if bkt, err = tx.CreateBucketIfNotExists([]byte(k)); err != nil {
+		return saveTxKey(tx, value, addr...)
+	})
+}
+
+func multiUpdate(db *bolt.DB, funcs ...func(*bolt.Tx) error) error {
+	if len(funcs) == 0 {
+		return nil
+	}
+	return db.Update(func(tx *bolt.Tx) error {
+		for _, fn := range funcs {
+			if err := fn(tx); err != nil {
 				return errors.WithStack(err)
 			}
 		}
-		return errors.WithStack(bkt.Put([]byte(addr[len(addr)-1]), val))
+		return nil
 	})
+}
+
+func saveTxKey(tx *bolt.Tx, value []byte, addr ...string) error {
+	val := make([]byte, len(value))
+	copy(val, value)
+	bkt, err := tx.CreateBucketIfNotExists([]byte(addr[0]))
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	for _, k := range addr[1 : len(addr)-1] {
+		if bkt, err = tx.CreateBucketIfNotExists([]byte(k)); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+	return errors.WithStack(bkt.Put([]byte(addr[len(addr)-1]), val))
 }
 
 // fetchKey retrieves value from provided database. Value address specified with
@@ -239,23 +347,74 @@ func fetchKey(db *bolt.DB, addr ...string) ([]byte, error) {
 	}
 	var out []byte
 	err := db.View(func(tx *bolt.Tx) error {
-		bkt := tx.Bucket([]byte(addr[0]))
-		if bkt == nil {
+		out = fetchTxKey(tx, addr...)
+		return nil
+	})
+	return out, errors.WithStack(err)
+}
+
+func fetchTxBucketKeys(tx *bolt.Tx, addr ...string) []string {
+	bkt := tx.Bucket([]byte(addr[0]))
+	if bkt == nil {
+		return nil
+	}
+	for _, k := range addr[1:] {
+		if bkt = bkt.Bucket([]byte(k)); bkt == nil {
 			return nil
 		}
-		for _, k := range addr[1:] {
-			if v := bkt.Get([]byte(k)); v != nil {
-				out = make([]byte, len(v))
-				copy(out, v)
-				return nil
-			}
-			if bkt = bkt.Bucket([]byte(k)); bkt == nil {
-				return nil
+	}
+	var out []string
+	cur := bkt.Cursor()
+	for k, _ := cur.First(); k != nil; k, _ = cur.Next() {
+		out = append(out, string(k))
+	}
+	return out
+}
+
+func fetchTxKey(tx *bolt.Tx, addr ...string) []byte {
+	bkt := tx.Bucket([]byte(addr[0]))
+	if bkt == nil {
+		return nil
+	}
+	for _, k := range addr[1:] {
+		if v := bkt.Get([]byte(k)); v != nil {
+			out := make([]byte, len(v))
+			copy(out, v)
+			return out
+		}
+		if bkt = bkt.Bucket([]byte(k)); bkt == nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+func fetchConfigs(db *bolt.DB, names ...string) (map[string][]byte, error) {
+	out := make(map[string][]byte, len(names))
+	err := db.View(func(tx *bolt.Tx) error {
+		if len(names) == 0 {
+			names = fetchTxBucketKeys(tx, "configs")
+		}
+		for _, k := range names {
+			if val := fetchTxKey(tx, "configs", k, "current"); val != nil {
+				out[k] = val
 			}
 		}
 		return nil
 	})
-	return out, errors.WithStack(err)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return out, nil
+}
+
+func configsVirtualFiles(m map[string][]byte, st *syscall.Stat_t) []os.FileInfo {
+	var out []os.FileInfo
+	now := time.Now().UTC()
+	for k, v := range m {
+		out = append(out, internals.NewFile(k+".json", false, now, v, st))
+	}
+	return out
 }
 
 // ComponentVersion represents single version of component
@@ -269,12 +428,12 @@ type ComponentVersion struct {
 
 const tsFormat = `2006-01-02T15:04:05`
 
-func (cv *ComponentVersion) byTimeKey() []byte {
+func (cv *ComponentVersion) byTimeKey() string {
 	b := make([]byte, 0, len(tsFormat)+1+len(cv.Version))
 	b = cv.Ctime.AppendFormat(b, tsFormat)
 	b = append(b, '#')
 	b = append(b, cv.Version...)
-	return b
+	return string(b)
 }
 
 // Configuration represents configuration data
@@ -308,8 +467,99 @@ func NewConfiguration(name string, layers ...ComponentVersion) (*Configuration, 
 	}, nil
 }
 
-func serveTerminal(rw io.ReadWriter) error {
-	return errors.New("not implemented")
+func serveTerminal(tr *tracker, rw io.ReadWriter) error {
+	term := terminal.NewTerminal(rw, "> ")
+	term.SetPrompt(string(term.Escape.Red) + "> " + string(term.Escape.Reset))
+	for {
+		line, err := term.ReadLine()
+		switch err {
+		case nil:
+		case io.EOF:
+			return nil
+		default:
+			return err
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if err := tr.handleTerminalCommand(strings.Fields(line)...); err != nil {
+			if _, err := fmt.Fprintln(term, err); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (tr *tracker) handleTerminalCommand(args ...string) error {
+	if len(args) == 0 {
+		return errors.New("nothing to do")
+	}
+	if args[0] != "deployctl" {
+		return errors.Errorf("unknown command: %q", args[0])
+	}
+	args = args[1:]
+	if len(args) == 0 {
+		return errors.New("nothing to do")
+	}
+	subcommand := args[0]
+	args = args[1:]
+	switch subcommand {
+	case "addver":
+		err := errors.New("Usage: deployctl addver <component:version> sha256:FILEHASH")
+		if len(args) != 2 {
+			return err
+		}
+		var component, version string
+		switch flds := strings.SplitN(args[0], ":", 2); {
+		case len(flds) != 2:
+			return err
+		default:
+			component, version = flds[0], flds[1]
+		}
+		return tr.handleAddVersion(component, version, args[1])
+	}
+	return errors.New("not yet implemented")
+}
+
+func (tr *tracker) handleAddVersion(component, version, hash string) error {
+	if component == "" || version == "" || len(hash) != len(hashPrefix)+64 ||
+		!strings.HasPrefix(hash, hashPrefix) {
+		return errors.New("invalid command arguments")
+	}
+	hash = strings.TrimPrefix(hash, hashPrefix)
+	tr.mu.Lock()
+	tname, ok := tr.uploads[hash]
+	tr.mu.Unlock()
+	if !ok {
+		return errors.New("no uploaded file with given hash value found")
+	}
+	cv := &ComponentVersion{
+		Name:    component,
+		Version: version,
+		File:    path.Join(filesDir, hash),
+		Hash:    hash,
+		Ctime:   time.Now().UTC(),
+	}
+	if err := os.Rename(tname, filepath.Join(tr.dir, filesDir, hash)); err != nil {
+		return err // TODO: don't output real error message here?
+	}
+	val, err := json.Marshal(cv)
+	if err != nil {
+		return err
+	}
+	fn1 := func(tx *bolt.Tx) error {
+		return saveTxKey(tx, val, bktComponents, component, bktByVersion, version)
+	}
+	fn2 := func(tx *bolt.Tx) error {
+		return saveTxKey(tx, val, bktComponents, component, bktByTime, cv.byTimeKey())
+	}
+	if err := multiUpdate(tr.db, fn1, fn2); err != nil {
+		return err
+	}
+	tr.mu.Lock()
+	delete(tr.uploads, hash)
+	tr.mu.Unlock()
+	return nil
 }
 
 type exitStatusMsg struct {

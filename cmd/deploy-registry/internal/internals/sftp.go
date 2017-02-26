@@ -1,12 +1,15 @@
 package internals
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
@@ -122,4 +125,44 @@ func fileHash(f io.ReadSeeker) ([]byte, error) {
 		return nil, errors.WithStack(err)
 	}
 	return h.Sum(nil), nil
+}
+
+// File implements both os.FileInfo and io.ReaderAt interfaces
+type File struct {
+	name  string
+	bytes []byte
+	rdat  io.ReaderAt
+	mode  os.FileMode
+	time  time.Time
+	sys   *syscall.Stat_t
+}
+
+// NewFile creates new virtual file
+func NewFile(name string, dir bool, mtime time.Time, data []byte, sys *syscall.Stat_t) *File {
+	f := &File{
+		name: filepath.Base(name),
+		time: mtime,
+		sys:  sys,
+		mode: os.FileMode(0750) | os.ModeDir,
+	}
+	if !dir {
+		f.mode = os.FileMode(0644)
+		f.bytes = data
+		f.rdat = bytes.NewReader(data)
+	}
+	return f
+}
+
+func (f *File) Name() string       { return f.name }
+func (f *File) Size() int64        { return int64(len(f.bytes)) }
+func (f *File) Mode() os.FileMode  { return f.mode }
+func (f *File) ModTime() time.Time { return f.time }
+func (f *File) IsDir() bool        { return f.mode.IsDir() }
+func (f *File) Sys() interface{}   { return f.sys }
+
+func (f *File) ReadAt(p []byte, off int64) (int, error) {
+	if f.rdat == nil || f.mode.IsDir() {
+		return 0, os.ErrInvalid
+	}
+	return f.rdat.ReadAt(p, off)
 }
