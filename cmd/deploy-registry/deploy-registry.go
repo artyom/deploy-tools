@@ -94,6 +94,10 @@ func run(args runConf) error {
 		}
 		go func(conn net.Conn) {
 			_ = conn.SetDeadline(time.Now().Add(5 * time.Minute)) // TODO
+			if c, ok := conn.(*net.TCPConn); ok {
+				c.SetKeepAlive(true)
+				c.SetKeepAlivePeriod(3 * time.Minute)
+			}
 			if err := serveConn(conn, config, tr); err != nil {
 				log.Printf("%+v", err)
 			}
