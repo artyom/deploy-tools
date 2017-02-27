@@ -348,6 +348,7 @@ func newTracker(name, dir string) (*tracker, error) {
 		cancel:  cancel,
 	}
 	go tr.cleanUploads(ctx)
+	go cleanVersions(ctx, tr.db, 10, time.Hour, nil)
 	return tr, nil
 }
 
@@ -384,6 +385,69 @@ func (tr *tracker) cleanUploads(ctx context.Context) {
 			_ = filepath.Walk(dir, fn)
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+// cleanVersions removes unreferenced component versions exceeding keep number,
+// scanning each scan.
+func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duration, log Logger) {
+	if keep < 1 || scan <= 0 {
+		return
+	}
+	fn := func(tx *bolt.Tx) error {
+		type compVer struct {
+			c, v string
+		}
+		var candidates []compVer
+		for _, name := range fetchTxBucketKeys(tx, bktComponents) {
+			keys := fetchTxBucketKeys(tx, bktComponents, name, bktByTime)
+			if len(keys) <= keep {
+				continue
+			}
+			for _, k := range keys[:len(keys)-keep] {
+				ver := k[1+strings.IndexRune(k, '#'):]
+				candidates = append(candidates, compVer{name, ver})
+			}
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		referenced := make(map[compVer]struct{})
+		for _, name := range fetchTxBucketKeys(tx, bktConfigs) {
+			cfg, err := getTxConfiguration(tx, name)
+			if err != nil {
+				return err
+			}
+			for _, l := range cfg.Layers {
+				cv := compVer{l.Name, l.Version}
+				referenced[cv] = struct{}{}
+			}
+		}
+		for _, cand := range candidates {
+			if _, ok := referenced[cand]; ok {
+				continue
+			}
+			cv, err := getTxComponentVersion(tx, cand.c, cand.v)
+			if err != nil {
+				return err
+			}
+			if err := cv.delete(tx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ticker := time.NewTicker(scan)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := db.Update(fn); err != nil && log != nil {
+				log.Println("error removing excess versions:", err)
+			}
 		}
 	}
 }
@@ -1212,6 +1276,14 @@ func delFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
 		return err
 	}
 	return saveTxKey(tx, data, bktFiles, hash)
+}
+
+// Logger describes set of methods used for logging. *log.Logger from standard
+// library implements this interface.
+type Logger interface {
+	Print(v ...interface{})
+	Printf(format string, v ...interface{})
+	Println(v ...interface{})
 }
 
 const verboseHelp = `
