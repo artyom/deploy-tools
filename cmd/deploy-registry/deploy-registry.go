@@ -529,6 +529,8 @@ func (cv *ComponentVersion) delete(tx *bolt.Tx) error {
 	})
 }
 
+// delComponentVersion removes single component version. It ensures that
+// version is not used by any configration.
 func delComponentVersion(tx *bolt.Tx, name, version string) error {
 	cv, err := getTxComponentVersion(tx, name, version)
 	if err != nil {
@@ -546,6 +548,43 @@ func delComponentVersion(tx *bolt.Tx, name, version string) error {
 		}
 	}
 	return cv.delete(tx)
+}
+
+// delComponent removes single component, including all its versions. It ensures
+// that component is not used in any configuration. It's more efficient than
+// remove component version-by-version using delComponentVersion.
+func delComponent(tx *bolt.Tx, name string) error {
+	var found bool
+	for _, k := range fetchTxBucketKeys(tx, bktComponents) {
+		if k == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.Errorf("%q component not found", name)
+	}
+	for _, cfgName := range fetchTxBucketKeys(tx, bktConfigs) {
+		cfg, err := getTxConfiguration(tx, cfgName)
+		if err != nil {
+			return err
+		}
+		for _, l := range cfg.Layers {
+			if name == l.Name {
+				return errors.Errorf("component is used by configuration %q", cfg.Name)
+			}
+		}
+	}
+	for _, ver := range fetchTxBucketKeys(tx, bktComponents, name, bktByVersion) {
+		cv, err := getTxComponentVersion(tx, name, ver)
+		if err != nil {
+			return err
+		}
+		if err := cv.delete(tx); err != nil {
+			return err
+		}
+	}
+	return delTxKey(tx, bktComponents, name)
 }
 
 // Configuration represents configuration data
@@ -717,6 +756,8 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		return tr.handleAddVersion(term, args)
 	case "delver":
 		return tr.handleDelVersion(term, args)
+	case "delcomp":
+		return tr.handleDelComponent(term, args)
 	case "addconf":
 		return tr.handleAddConfiguration(term, args)
 	case "changeconf":
@@ -735,6 +776,7 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		"components", "configurations",
 		"showcomp",
 		"delver",
+		"delcomp",
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
@@ -875,6 +917,24 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 		return err
 	}
 	return multiUpdate(tr.db, cfg.save)
+}
+
+func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name string `flag:"name,component name"`
+	}{}
+	fs := flag.NewFlagSet("delver", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" {
+		return errors.New("invalid command arguments")
+	}
+	return tr.db.Update(func(tx *bolt.Tx) error {
+		return delComponent(tx, args.Name)
+	})
 }
 
 func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
@@ -1065,6 +1125,7 @@ func delFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
 const verboseHelp = `
 addver          add new component version from previously uploaded file
 delver          delete component version
+delcomp         delete the whole component
 addconf         add new configuration from existing component versions
 changeconf      update single layer in existing configuration
 showconf        show configuration
