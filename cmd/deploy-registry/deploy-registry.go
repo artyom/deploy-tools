@@ -759,9 +759,9 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 
 func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	args := struct {
-		Component string `flag:"component,name of the component"`
-		Version   string `flag:"version,unique version id"`
-		Hash      string `flag:"hash,sha256 hash in hex representation (64 chars)"`
+		Name    string `flag:"name,component name"`
+		Version string `flag:"version,unique version id"`
+		Hash    string `flag:"hash,sha256 content hash in hex representation (64 chars)"`
 	}{}
 	fs := flag.NewFlagSet("addver", flag.ContinueOnError)
 	fs.SetOutput(w)
@@ -769,10 +769,10 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	if fs.Parse(rawArgs) != nil {
 		return nil // flagset already wrote error to term
 	}
-	if args.Component == "" || args.Version == "" || args.Hash == "" {
+	if args.Name == "" || args.Version == "" || args.Hash == "" {
 		return errors.New("invalid command arguments")
 	}
-	if strings.ContainsRune(args.Component, ':') {
+	if strings.ContainsRune(args.Name, ':') {
 		return errors.New("component name cannot contain ':'")
 	}
 	if len(args.Hash) != 64 {
@@ -785,7 +785,7 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 		return errors.New("no uploaded file with given hash found")
 	}
 	cv := &ComponentVersion{
-		Name:    args.Component,
+		Name:    args.Name,
 		Version: args.Version,
 		File:    path.Join(filesDir, args.Hash),
 		Hash:    args.Hash,
@@ -799,10 +799,10 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 		return err
 	}
 	fn1 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, args.Component, bktByVersion, args.Version)
+		return saveTxKey(tx, val, bktComponents, args.Name, bktByVersion, args.Version)
 	}
 	fn2 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, args.Component, bktByTime, cv.byTimeKey())
+		return saveTxKey(tx, val, bktComponents, args.Name, bktByTime, cv.byTimeKey())
 	}
 	if err := multiUpdate(tr.db, fn1, fn2); err != nil {
 		return err
