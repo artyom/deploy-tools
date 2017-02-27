@@ -529,6 +529,21 @@ func (cv *ComponentVersion) delete(tx *bolt.Tx) error {
 	})
 }
 
+// delConfiguration removes single configuration.
+func delConfiguration(tx *bolt.Tx, name string) error {
+	var found bool
+	for _, k := range fetchTxBucketKeys(tx, bktConfigs) {
+		if k == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.Errorf("%q configuration not found", name)
+	}
+	return delTxKey(tx, bktConfigs, name)
+}
+
 // delComponentVersion removes single component version. It ensures that
 // version is not used by any configration.
 func delComponentVersion(tx *bolt.Tx, name, version string) error {
@@ -758,6 +773,8 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		return tr.handleDelVersion(term, args)
 	case "delcomp":
 		return tr.handleDelComponent(term, args)
+	case "delconf":
+		return tr.handleDelConfiguration(term, args)
 	case "addconf":
 		return tr.handleAddConfiguration(term, args)
 	case "changeconf":
@@ -777,6 +794,7 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		"showcomp",
 		"delver",
 		"delcomp",
+		"delconf",
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
@@ -919,11 +937,33 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 	return multiUpdate(tr.db, cfg.save)
 }
 
+func (tr *tracker) handleDelConfiguration(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name  string `flag:"name,configuration name"`
+		Force bool   `flag:"force,remove configuration for real"`
+	}{}
+	fs := flag.NewFlagSet("delconf", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" {
+		return errors.New("invalid command arguments")
+	}
+	if !args.Force {
+		return errors.New("Run command with -force flag to confirm removal")
+	}
+	return tr.db.Update(func(tx *bolt.Tx) error {
+		return delConfiguration(tx, args.Name)
+	})
+}
+
 func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
 	args := struct {
 		Name string `flag:"name,component name"`
 	}{}
-	fs := flag.NewFlagSet("delver", flag.ContinueOnError)
+	fs := flag.NewFlagSet("delcomp", flag.ContinueOnError)
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
@@ -1127,6 +1167,7 @@ addver          add new component version from previously uploaded file
 delver          delete component version
 delcomp         delete the whole component
 addconf         add new configuration from existing component versions
+delconf         delete configuration
 changeconf      update single layer in existing configuration
 showconf        show configuration
 showcomp        show component versions
