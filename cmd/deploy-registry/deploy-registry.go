@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -143,10 +144,13 @@ func handleServiceSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *t
 }
 
 func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *tracker) {
+	var width, height int // terminal dimensions, updated by pty-req
 	for req := range requests {
 		var ok bool
 		switch {
 		case req.Type == "pty-req":
+			// TODO: handle "window-change" as well
+			width, height = ptyRequestDimensions(req.Payload)
 			req.Reply(true, nil)
 			continue
 		case req.Type == "shell":
@@ -155,7 +159,7 @@ func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *
 				defer sshCh.Close()      // SSH_MSG_CHANNEL_CLOSE
 				defer sshCh.CloseWrite() // SSH_MSG_CHANNEL_EOF
 				defer sshCh.SendRequest("eow@openssh.com", false, nil)
-				switch err := serveTerminal(tr, sshCh); err {
+				switch err := serveTerminal(tr, width, height, sshCh); err {
 				case nil:
 					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{0}))
 				default:
@@ -608,8 +612,11 @@ func getTxComponentVersion(tx *bolt.Tx, component, version string) (*ComponentVe
 	return &cv, nil
 }
 
-func serveTerminal(tr *tracker, rw io.ReadWriter) error {
+func serveTerminal(tr *tracker, width, height int, rw io.ReadWriter) error {
 	term := terminal.NewTerminal(rw, "> ")
+	if width > 0 && height > 0 {
+		_ = term.SetSize(width, height)
+	}
 	term.SetPrompt(string(term.Escape.Red) + "> " + string(term.Escape.Reset))
 	for {
 		line, err := term.ReadLine()
@@ -858,6 +865,23 @@ func (c *compVerSlice) Set(value string) error {
 	}
 	*c = append(*c, compVer{comp: flds[0], ver: flds[1]})
 	return nil
+}
+
+// ptyRequestDimensions parses "pty-req" request payload as specified in
+// RFC4254, section 6.2 and returns width and height. In case of errors zero
+// values are returned.
+func ptyRequestDimensions(b []byte) (width, height int) {
+	if len(b) < 4 {
+		return 0, 0
+	}
+	termLen := int(b[3]) // TERM variable size
+	if len(b) <= 3+1+termLen+4*2 {
+		return 0, 0
+	}
+	b = b[3+1+termLen:]
+	w := binary.BigEndian.Uint32(b)
+	h := binary.BigEndian.Uint32(b[4:])
+	return int(w), int(h)
 }
 
 const verboseHelp = `
