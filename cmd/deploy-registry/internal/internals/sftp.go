@@ -15,6 +15,9 @@ import (
 	"github.com/pkg/sftp"
 )
 
+// UploadPrefix is used when creating temporary files to save uploads to
+const UploadPrefix = "upload-"
+
 // NewUploadServer returns sftp.RequestServer that only handles file uploads
 // (put requests) using newUploadHandlers.
 func NewUploadServer(rwc io.ReadWriteCloser, dir string, callback func(name, hash string)) *sftp.RequestServer {
@@ -93,7 +96,7 @@ type FileReadFunc func(sftp.Request) (io.ReaderAt, error)
 // calculate hash of uploaded file.
 func newWriterAt(dir string, callback func(name, hash string)) (io.WriterAt, error) {
 	_ = os.MkdirAll(dir, 0700)
-	f, err := ioutil.TempFile(dir, "upload-")
+	f, err := ioutil.TempFile(dir, UploadPrefix)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

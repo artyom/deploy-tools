@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -197,7 +198,8 @@ type tracker struct {
 	// files holds references to open files from filesDir
 	files map[string]ReaderAtCloser
 
-	st *syscall.Stat_t // used to attach to virtual files
+	st     *syscall.Stat_t // used to attach to virtual files
+	cancel func()
 }
 
 func (tr *tracker) uploadCallback(name, hash string) {
@@ -332,16 +334,62 @@ func newTracker(name, dir string) (*tracker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tracker{
+	ctx, cancel := context.WithCancel(context.Background())
+	tr := &tracker{
 		db:      db,
 		dir:     dir,
 		uploads: make(map[string]string),
 		files:   make(map[string]ReaderAtCloser),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
-	}, nil
+		cancel:  cancel,
+	}
+	go tr.cleanUploads(ctx)
+	return tr, nil
 }
 
-func (tr *tracker) Close() error { return tr.db.Close() }
+// cleanUploads periodially checks uploads directory and removes orphaned files
+// that were uploaded but were not assigned to any components
+func (tr *tracker) cleanUploads(ctx context.Context) {
+	maxAge := 30 * time.Minute
+	fn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || !strings.HasPrefix(filepath.Base(path), internals.UploadPrefix) {
+			return nil
+		}
+		if time.Now().Sub(info.ModTime()) < maxAge {
+			return nil
+		}
+		tr.mu.Lock()
+		for k, name := range tr.uploads {
+			if path != name {
+				continue
+			}
+			delete(tr.uploads, k)
+		}
+		tr.mu.Unlock()
+		return os.Remove(path)
+	}
+	dir := filepath.Join(tr.dir, uploadDir)
+	ticker := time.NewTicker(maxAge / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = filepath.Walk(dir, fn)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (tr *tracker) Close() error {
+	if tr.cancel != nil {
+		tr.cancel()
+	}
+	return tr.db.Close()
+}
 
 // saveKey saves provided value in a boltDB at given address. Address should
 // have at least 2 elements, as boltDB does not allow root bucket values. Last
