@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -495,6 +496,46 @@ func (cfg *Configuration) tsKey() string {
 	return string(b)
 }
 
+// replaceLayer replaces existing layer in configuration with new one, updating
+// configuration Mtime and Hash as necessary. Configuration is only updated if
+// matching layer to replace is found, otherwise error is returned.
+func (cfg *Configuration) replaceLayer(cv *ComponentVersion) error {
+	var found bool
+	h := sha256.New()
+	for i, cv2 := range cfg.Layers {
+		switch {
+		case cv2.Name == cv.Name:
+			cfg.Layers[i] = cv
+			found = true
+			fmt.Fprintf(h, "%s\n", cv.Hash)
+		default:
+			fmt.Fprintf(h, "%s\n", cv2.Hash)
+		}
+	}
+	if !found {
+		return errors.Errorf("configuration has no layer for component %q", cv.Name)
+	}
+	cfg.Mtime = time.Now().UTC()
+	cfg.Hash = fmt.Sprintf("%x", h.Sum(nil))
+	return nil
+}
+
+// save marshals configuration and saves it to "current" and timestamp-based
+// keys using provided transaction
+func (cfg *Configuration) save(tx *bolt.Tx) error {
+	buf := new(bytes.Buffer)
+	enc := json.NewEncoder(buf)
+	enc.SetIndent("", "\t")
+	if err := enc.Encode(cfg); err != nil {
+		return err
+	}
+	buf.WriteByte('\n')
+	if err := saveTxKey(tx, buf.Bytes(), bktConfigs, cfg.Name, keyCurrent); err != nil {
+		return err
+	}
+	return saveTxKey(tx, buf.Bytes(), bktConfigs, cfg.Name, cfg.tsKey())
+}
+
 // NewConfiguration creates new configuration with given name from provided
 // layers. Each layer should belong to different component.
 func NewConfiguration(name string, layers ...*ComponentVersion) (*Configuration, error) {
@@ -523,6 +564,40 @@ func getComponentVersion(db *bolt.DB, component, version string) (*ComponentVers
 	if err != nil {
 		return nil, err
 	}
+	if data == nil {
+		return nil, errors.Errorf("no version %q for component %q found", version, component)
+	}
+	var cv ComponentVersion
+	if err := json.Unmarshal(data, &cv); err != nil {
+		return nil, err
+	}
+	return &cv, nil
+}
+
+func getConfiguration(db *bolt.DB, name string) (*Configuration, error) {
+	var cfg *Configuration
+	err := db.View(func(tx *bolt.Tx) error {
+		c, err := getTxConfiguration(tx, name)
+		cfg = c
+		return err
+	})
+	return cfg, err
+}
+
+func getTxConfiguration(tx *bolt.Tx, name string) (*Configuration, error) {
+	data := fetchTxKey(tx, bktConfigs, name, keyCurrent)
+	if data == nil {
+		return nil, errors.Errorf("configuration %q not found", name)
+	}
+	var conf Configuration
+	if err := json.Unmarshal(data, &conf); err != nil {
+		return nil, err
+	}
+	return &conf, nil
+}
+
+func getTxComponentVersion(tx *bolt.Tx, component, version string) (*ComponentVersion, error) {
+	data := fetchTxKey(tx, bktComponents, component, bktByVersion, version)
 	if data == nil {
 		return nil, errors.Errorf("no version %q for component %q found", version, component)
 	}
@@ -563,18 +638,89 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	if len(args) == 0 {
 		return errors.New("nothing to do")
 	}
-	switch args[0] {
+	switch cmd, args := args[0], args[1:]; cmd {
 	case "help":
-		fmt.Fprintln(term, "Supported commands: addver, addconf")
+		fmt.Fprintln(term, strings.TrimSpace(verboseHelp))
 		return nil
 	case "addver":
-		return tr.handleAddVersion(term, args[1:])
+		return tr.handleAddVersion(term, args)
 	case "addconf":
-		return tr.handleAddConfiguration(term, args[1:])
-	default:
-		return errors.Errorf("unknown command: %q", args[0])
+		return tr.handleAddConfiguration(term, args)
+	case "changeconf":
+		return tr.handleUpdateConfiguration(term, args)
+	case "showconf":
+		return tr.handleShowConfiguration(term, args)
 	}
-	return errors.New("not yet implemented")
+	knownCommands := []string{"help", "addver", "addconf",
+		"changeconf", "showconf",
+	}
+	fmt.Fprintln(term, "Unknown command, supported commands are:")
+	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
+	return nil
+}
+
+func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name    string `flag:"name,configuration name"`
+		Verbose bool   `flag:"v,show extra details"`
+	}{}
+	fs := flag.NewFlagSet("showconf", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" {
+		return errors.New("invalid command arguments")
+	}
+	cfg, err := getConfiguration(tr.db, args.Name)
+	if err != nil {
+		return err
+	}
+	if args.Verbose {
+		fmt.Fprintf(w, "Name:\t%s\n", cfg.Name)
+		fmt.Fprintf(w, "Mtime:\t%s\n", cfg.Mtime.Format(time.RFC3339))
+		fmt.Fprintf(w, "Hash:\t%s\n", cfg.Hash)
+		fmt.Fprintln(w)
+	}
+	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
+	for _, l := range cfg.Layers {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", l.Name, l.Version,
+			l.Ctime.Format(time.RFC3339))
+	}
+	return tw.Flush()
+}
+
+func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name string `flag:"name,configuration name"`
+		Comp string `flag:"component,component name to update"`
+		Ver  string `flag:"version,new version of selected component"`
+	}{}
+	fs := flag.NewFlagSet("changeconf", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" || args.Comp == "" || args.Ver == "" {
+		return errors.New("invalid command arguments")
+	}
+	fn := func(tx *bolt.Tx) error {
+		cv, err := getTxComponentVersion(tx, args.Comp, args.Ver)
+		if err != nil {
+			return err
+		}
+		cfg, err := getTxConfiguration(tx, args.Name)
+		if err != nil {
+			return err
+		}
+		if err := cfg.replaceLayer(cv); err != nil {
+			return err
+		}
+		return cfg.save(tx)
+	}
+	return multiUpdate(tr.db, fn)
 }
 
 func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
@@ -603,17 +749,7 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	fn1 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, data, bktConfigs, args.Name, keyCurrent)
-	}
-	fn2 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, data, bktConfigs, args.Name, cfg.tsKey())
-	}
-	return multiUpdate(tr.db, fn1, fn2)
+	return multiUpdate(tr.db, cfg.save)
 }
 
 func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
@@ -723,3 +859,12 @@ func (c *compVerSlice) Set(value string) error {
 	*c = append(*c, compVer{comp: flds[0], ver: flds[1]})
 	return nil
 }
+
+const verboseHelp = `
+addver          add new component version from previously uploaded file
+addconf         add new configuration from existing component versions
+changeconf      update single layer in existing configuration
+showconf        show configuration
+
+type "command -h" to get more help on a specific command
+`
