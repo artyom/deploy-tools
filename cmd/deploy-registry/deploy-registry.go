@@ -353,7 +353,7 @@ func newTracker(name, dir string, log Logger) (*tracker, error) {
 	return tr, nil
 }
 
-// cleanUploads periodially checks uploads directory and removes orphaned files
+// cleanUploads periodically checks uploads directory and removes orphaned files
 // that were uploaded but were not assigned to any components
 func (tr *tracker) cleanUploads(ctx context.Context) {
 	maxAge := 30 * time.Minute
