@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -23,6 +24,7 @@ import (
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/cmd/deploy-registry/internal/internals"
 	"github.com/boltdb/bolt"
+	shellwords "github.com/mattn/go-shellwords"
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
 )
@@ -62,6 +64,7 @@ const (
 	bktByTime     = "byTime"
 	bktComponents = "components"
 	bktConfigs    = "configs"
+	keyCurrent    = "current"
 )
 
 func run(args runConf) error {
@@ -186,7 +189,10 @@ type tracker struct {
 	// uploads holds mapping of uploaded file hash to its full (temporary)
 	// name
 	uploads map[string]string
-	st      *syscall.Stat_t // used to attach to virtual files
+	// files holds references to open files from filesDir
+	files map[string]ReaderAtCloser
+
+	st *syscall.Stat_t // used to attach to virtual files
 }
 
 func (tr *tracker) uploadCallback(name, hash string) {
@@ -240,7 +246,7 @@ func (tr *tracker) statPath(reqPath string) (os.FileInfo, error) {
 	}
 	// the only case left unprocessed so far is "/configs/?*.json"
 	name := strings.TrimSuffix(path.Base(reqPath), ".json")
-	data, err := fetchKey(tr.db, "configs", name, "current")
+	data, err := fetchKey(tr.db, bktConfigs, name, keyCurrent)
 	if err != nil {
 		return nil, err
 	}
@@ -274,11 +280,46 @@ func (tr *tracker) listDirs(reqPath string) ([]os.FileInfo, error) {
 	return []os.FileInfo{statConfigs, statFiles}, nil
 }
 
+func (tr *tracker) openFile(base string) (ReaderAtCloser, error) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	r, ok := tr.files[base]
+	if ok {
+		return r, nil
+	}
+	f, err := os.Open(filepath.Join(tr.dir, filesDir, base))
+	if err != nil {
+		return nil, err
+	}
+	r = &openFile{f: f, closeCallback: func() {
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		delete(tr.files, base)
+	}}
+	tr.files[base] = r
+	return f, nil
+}
+
 func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
-	// r.Filepath may match one of the following patterns:
-	// 1. "/configs/?*.json" — virtual file w/json dump of config
-	// 2. "/files/?*" — real file from disk
-	return nil, syscall.EPERM // TODO
+	rPath := path.Clean(r.Filepath)
+	if ok, err := path.Match("/files/?*", rPath); ok && err == nil {
+		return tr.openFile(path.Base(rPath))
+	}
+	if ok, err := path.Match("/configs/?*.json", rPath); ok && err == nil {
+		return tr.openConfig(strings.TrimSuffix(path.Base(rPath), ".json"))
+	}
+	return nil, syscall.ENOENT
+}
+
+func (tr *tracker) openConfig(name string) (io.ReaderAt, error) {
+	data, err := fetchKey(tr.db, bktConfigs, name, keyCurrent)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, syscall.ENOENT
+	}
+	return bytes.NewReader(data), nil
 }
 
 func newTracker(name, dir string) (*tracker, error) {
@@ -290,6 +331,7 @@ func newTracker(name, dir string) (*tracker, error) {
 		db:      db,
 		dir:     dir,
 		uploads: make(map[string]string),
+		files:   make(map[string]ReaderAtCloser),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 	}, nil
 }
@@ -330,7 +372,7 @@ func saveTxKey(tx *bolt.Tx, value []byte, addr ...string) error {
 		return errors.WithStack(err)
 	}
 	for _, k := range addr[1 : len(addr)-1] {
-		if bkt, err = tx.CreateBucketIfNotExists([]byte(k)); err != nil {
+		if bkt, err = bkt.CreateBucketIfNotExists([]byte(k)); err != nil {
 			return errors.WithStack(err)
 		}
 	}
@@ -396,7 +438,7 @@ func fetchConfigs(db *bolt.DB, names ...string) (map[string][]byte, error) {
 			names = fetchTxBucketKeys(tx, "configs")
 		}
 		for _, k := range names {
-			if val := fetchTxKey(tx, "configs", k, "current"); val != nil {
+			if val := fetchTxKey(tx, bktConfigs, k, keyCurrent); val != nil {
 				out[k] = val
 			}
 		}
@@ -441,12 +483,21 @@ type Configuration struct {
 	Name   string
 	Mtime  time.Time
 	Hash   string
-	Layers []ComponentVersion
+	Layers []*ComponentVersion
+}
+
+func (cfg *Configuration) tsKey() string {
+	const prefixLen = 5
+	b := make([]byte, 0, len(tsFormat)+1+prefixLen)
+	b = cfg.Mtime.AppendFormat(b, tsFormat)
+	b = append(b, '#')
+	b = append(b, cfg.Hash[:prefixLen]...)
+	return string(b)
 }
 
 // NewConfiguration creates new configuration with given name from provided
 // layers. Each layer should belong to different component.
-func NewConfiguration(name string, layers ...ComponentVersion) (*Configuration, error) {
+func NewConfiguration(name string, layers ...*ComponentVersion) (*Configuration, error) {
 	if name == "" || len(layers) == 0 {
 		return nil, errors.New("invalid configuration arguments")
 	}
@@ -467,6 +518,21 @@ func NewConfiguration(name string, layers ...ComponentVersion) (*Configuration, 
 	}, nil
 }
 
+func getComponentVersion(db *bolt.DB, component, version string) (*ComponentVersion, error) {
+	data, err := fetchKey(db, bktComponents, component, bktByVersion, version)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, errors.Errorf("no version %q for component %q found", version, component)
+	}
+	var cv ComponentVersion
+	if err := json.Unmarshal(data, &cv); err != nil {
+		return nil, err
+	}
+	return &cv, nil
+}
+
 func serveTerminal(tr *tracker, rw io.ReadWriter) error {
 	term := terminal.NewTerminal(rw, "> ")
 	term.SetPrompt(string(term.Escape.Red) + "> " + string(term.Escape.Reset))
@@ -482,65 +548,106 @@ func serveTerminal(tr *tracker, rw io.ReadWriter) error {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if err := tr.handleTerminalCommand(strings.Fields(line)...); err != nil {
-			if _, err := fmt.Fprintln(term, err); err != nil {
-				return err
-			}
+		args, err := shellwords.Parse(line)
+		if err != nil {
+			fmt.Fprintln(term, err)
+			continue
+		}
+		if err := tr.handleTerminalCommand(term, args); err != nil {
+			fmt.Fprintln(term, err)
 		}
 	}
 }
 
-func (tr *tracker) handleTerminalCommand(args ...string) error {
+func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	if len(args) == 0 {
 		return errors.New("nothing to do")
 	}
-	if args[0] != "deployctl" {
-		return errors.Errorf("unknown command: %q", args[0])
-	}
-	args = args[1:]
-	if len(args) == 0 {
-		return errors.New("nothing to do")
-	}
-	subcommand := args[0]
-	args = args[1:]
-	switch subcommand {
+	switch args[0] {
+	case "help":
+		fmt.Fprintln(term, "Supported commands: addver, addconf")
+		return nil
 	case "addver":
-		err := errors.New("Usage: deployctl addver <component:version> sha256:FILEHASH")
-		if len(args) != 2 {
-			return err
-		}
-		var component, version string
-		switch flds := strings.SplitN(args[0], ":", 2); {
-		case len(flds) != 2:
-			return err
-		default:
-			component, version = flds[0], flds[1]
-		}
-		return tr.handleAddVersion(component, version, args[1])
+		return tr.handleAddVersion(term, args[1:])
+	case "addconf":
+		return tr.handleAddConfiguration(term, args[1:])
+	default:
+		return errors.Errorf("unknown command: %q", args[0])
 	}
 	return errors.New("not yet implemented")
 }
 
-func (tr *tracker) handleAddVersion(component, version, hash string) error {
-	if component == "" || version == "" || len(hash) != len(hashPrefix)+64 ||
-		!strings.HasPrefix(hash, hashPrefix) {
+func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name   string       `flag:"name,configuration name"`
+		Layers compVerSlice `flag:"layer,layer in component:version format; can be set multiple times"`
+	}{}
+	fs := flag.NewFlagSet("addconf", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" || len(args.Layers) == 0 {
 		return errors.New("invalid command arguments")
 	}
-	hash = strings.TrimPrefix(hash, hashPrefix)
+	var layers []*ComponentVersion
+	for _, l := range args.Layers {
+		cv, err := getComponentVersion(tr.db, l.comp, l.ver)
+		if err != nil {
+			return err
+		}
+		layers = append(layers, cv)
+	}
+	cfg, err := NewConfiguration(args.Name, layers...)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	fn1 := func(tx *bolt.Tx) error {
+		return saveTxKey(tx, data, bktConfigs, args.Name, keyCurrent)
+	}
+	fn2 := func(tx *bolt.Tx) error {
+		return saveTxKey(tx, data, bktConfigs, args.Name, cfg.tsKey())
+	}
+	return multiUpdate(tr.db, fn1, fn2)
+}
+
+func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Component string `flag:"component,name of the component"`
+		Version   string `flag:"version,unique version id"`
+		Hash      string `flag:"hash,sha256 hash in hex representation (64 chars)"`
+	}{}
+	fs := flag.NewFlagSet("addver", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Component == "" || args.Version == "" || args.Hash == "" {
+		return errors.New("invalid command arguments")
+	}
+	if len(args.Hash) != 64 {
+		return errors.New("invalid hash specification")
+	}
 	tr.mu.Lock()
-	tname, ok := tr.uploads[hash]
+	tname, ok := tr.uploads[args.Hash]
 	tr.mu.Unlock()
 	if !ok {
-		return errors.New("no uploaded file with given hash value found")
+		return errors.New("no uploaded file with given hash found")
 	}
 	cv := &ComponentVersion{
-		Name:    component,
-		Version: version,
-		File:    path.Join(filesDir, hash),
-		Hash:    hash,
+		Name:    args.Component,
+		Version: args.Version,
+		File:    path.Join(filesDir, args.Hash),
+		Hash:    args.Hash,
 		Ctime:   time.Now().UTC(),
 	}
-	if err := os.Rename(tname, filepath.Join(tr.dir, filesDir, hash)); err != nil {
+	if err := os.Rename(tname, filepath.Join(tr.dir, filesDir, args.Hash)); err != nil {
 		return err // TODO: don't output real error message here?
 	}
 	val, err := json.Marshal(cv)
@@ -548,16 +655,16 @@ func (tr *tracker) handleAddVersion(component, version, hash string) error {
 		return err
 	}
 	fn1 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, component, bktByVersion, version)
+		return saveTxKey(tx, val, bktComponents, args.Component, bktByVersion, args.Version)
 	}
 	fn2 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, component, bktByTime, cv.byTimeKey())
+		return saveTxKey(tx, val, bktComponents, args.Component, bktByTime, cv.byTimeKey())
 	}
 	if err := multiUpdate(tr.db, fn1, fn2); err != nil {
 		return err
 	}
 	tr.mu.Lock()
-	delete(tr.uploads, hash)
+	delete(tr.uploads, args.Hash)
 	tr.mu.Unlock()
 	return nil
 }
@@ -571,4 +678,48 @@ func isSftpRequest(req *ssh.Request) bool {
 		return false
 	}
 	return req.Type == "subsystem" && len(req.Payload) > 4 && string(req.Payload[4:]) == "sftp"
+}
+
+type ReaderAtCloser interface {
+	io.ReaderAt
+	io.Closer
+}
+
+// openFile implements io.ReaderAt, io.Closer
+type openFile struct {
+	f             *os.File
+	once          sync.Once
+	closeCallback func()
+}
+
+func (of *openFile) ReadAt(p []byte, off int64) (int, error) { return of.f.ReadAt(p, off) }
+func (of *openFile) Close() error {
+	of.once.Do(of.closeCallback)
+	return of.f.Close()
+}
+
+// compVer holds single layer specification as passed by operator
+type compVer struct {
+	comp, ver string
+}
+
+// compVerSlice implements flag.Value interface
+type compVerSlice []compVer
+
+func (c *compVerSlice) String() string { return "" }
+func (c *compVerSlice) Set(value string) error {
+	flds := strings.SplitN(value, ":", 2)
+	if len(flds) != 2 {
+		return errors.New("invalid value")
+	}
+	for _, v := range *c {
+		// XXX: this may not the best way to check for dupes, but
+		// normally number of layers is expected to be small, so leave
+		// this as is for now
+		if v.comp == flds[0] {
+			return errors.Errorf("duplicate component %q", flds[0])
+		}
+	}
+	*c = append(*c, compVer{comp: flds[0], ver: flds[1]})
+	return nil
 }
