@@ -58,9 +58,8 @@ type runConf struct {
 }
 
 const (
-	filesDir   = "files"
-	uploadDir  = "uploads"
-	hashPrefix = "sha256:"
+	filesDir  = "files"
+	uploadDir = "uploads"
 
 	bktByVersion  = "byVersion"
 	bktByTime     = "byTime"
@@ -533,7 +532,6 @@ func (cfg *Configuration) save(tx *bolt.Tx) error {
 	if err := enc.Encode(cfg); err != nil {
 		return err
 	}
-	buf.WriteByte('\n')
 	if err := saveTxKey(tx, buf.Bytes(), bktConfigs, cfg.Name, keyCurrent); err != nil {
 		return err
 	}
@@ -773,6 +771,9 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	}
 	if args.Component == "" || args.Version == "" || args.Hash == "" {
 		return errors.New("invalid command arguments")
+	}
+	if strings.ContainsRune(args.Component, ':') {
+		return errors.New("component name cannot contain ':'")
 	}
 	if len(args.Hash) != 64 {
 		return errors.New("invalid hash specification")
