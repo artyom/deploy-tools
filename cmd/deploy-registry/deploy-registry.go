@@ -656,27 +656,29 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	case "showconf":
 		return tr.handleShowConfiguration(term, args)
 	case "components":
-		return tr.handleShowAllComponents(term, args)
+		return tr.handleShowBucketKeys(term, bktComponents)
+	case "configurations":
+		return tr.handleShowBucketKeys(term, bktConfigs)
 	}
 	knownCommands := []string{"help", "addver", "addconf",
 		"changeconf", "showconf",
-		"components",
+		"components", "configurations",
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
 	return nil
 }
 
-func (tr *tracker) handleShowAllComponents(w io.Writer, rawArgs []string) error {
-	var components []string
+func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketName string) error {
+	var keys []string
 	err := tr.db.View(func(tx *bolt.Tx) error {
-		components = fetchTxBucketKeys(tx, bktComponents)
+		keys = fetchTxBucketKeys(tx, bucketName)
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	for _, name := range components {
+	for _, name := range keys {
 		fmt.Fprintln(w, name)
 	}
 	return nil
@@ -909,6 +911,7 @@ addconf         add new configuration from existing component versions
 changeconf      update single layer in existing configuration
 showconf        show configuration
 components      show list of all known components
+configurations  show list of all known configurations
 
 type "command -h" to get more help on a specific command
 `
