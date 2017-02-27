@@ -687,8 +687,7 @@ func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketAddr ...string) error
 
 func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
 	args := struct {
-		Name    string `flag:"name,component name"`
-		Verbose bool   `flag:"v,show extra details"`
+		Name string `flag:"name,component name"`
 	}{}
 	fs := flag.NewFlagSet("showcomp", flag.ContinueOnError)
 	fs.SetOutput(w)
