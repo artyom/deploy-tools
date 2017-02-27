@@ -472,11 +472,9 @@ type ComponentVersion struct {
 	Ctime   time.Time
 }
 
-const tsFormat = `2006-01-02T15:04:05`
-
 func (cv *ComponentVersion) byTimeKey() string {
-	b := make([]byte, 0, len(tsFormat)+1+len(cv.Version))
-	b = cv.Ctime.AppendFormat(b, tsFormat)
+	b := make([]byte, 0, len(time.RFC3339)+1+len(cv.Version))
+	b = cv.Ctime.AppendFormat(b, time.RFC3339)
 	b = append(b, '#')
 	b = append(b, cv.Version...)
 	return string(b)
@@ -492,8 +490,8 @@ type Configuration struct {
 
 func (cfg *Configuration) tsKey() string {
 	const prefixLen = 5
-	b := make([]byte, 0, len(tsFormat)+1+prefixLen)
-	b = cfg.Mtime.AppendFormat(b, tsFormat)
+	b := make([]byte, 0, len(time.RFC3339)+1+prefixLen)
+	b = cfg.Mtime.AppendFormat(b, time.RFC3339)
 	b = append(b, '#')
 	b = append(b, cfg.Hash[:prefixLen]...)
 	return string(b)
