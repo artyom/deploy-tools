@@ -384,6 +384,20 @@ func saveTxKey(tx *bolt.Tx, value []byte, addr ...string) error {
 	return errors.WithStack(bkt.Put([]byte(addr[len(addr)-1]), val))
 }
 
+func delTxKey(tx *bolt.Tx, addr ...string) error {
+	bkt := tx.Bucket([]byte(addr[0]))
+	if bkt == nil {
+		return nil
+	}
+	for _, k := range addr[1 : len(addr)-1] {
+		bkt = bkt.Bucket([]byte(k))
+		if bkt == nil {
+			return nil
+		}
+	}
+	return errors.WithStack(bkt.Delete([]byte(addr[len(addr)-1])))
+}
+
 // fetchKey retrieves value from provided database. Value address specified with
 // addr string slice, which may address nested buckets. addr should have at
 // least 2 elements, as boltDB does not allow root bucket values. Error returned
@@ -440,7 +454,7 @@ func fetchConfigs(db *bolt.DB, names ...string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(names))
 	err := db.View(func(tx *bolt.Tx) error {
 		if len(names) == 0 {
-			names = fetchTxBucketKeys(tx, "configs")
+			names = fetchTxBucketKeys(tx, bktConfigs)
 		}
 		for _, k := range names {
 			if val := fetchTxKey(tx, bktConfigs, k, keyCurrent); val != nil {
@@ -498,6 +512,40 @@ func (cv *ComponentVersion) save(tx *bolt.Tx) error {
 		Component: cv.Name,
 		Version:   cv.Version,
 	})
+}
+
+func (cv *ComponentVersion) delete(tx *bolt.Tx) error {
+	err := delTxKey(tx, bktComponents, cv.Name, bktByVersion, cv.Version)
+	if err != nil {
+		return err
+	}
+	err = delTxKey(tx, bktComponents, cv.Name, bktByTime, cv.byTimeKey())
+	if err != nil {
+		return err
+	}
+	return delFileReference(tx, cv.Hash, fileReference{
+		Component: cv.Name,
+		Version:   cv.Version,
+	})
+}
+
+func delComponentVersion(tx *bolt.Tx, name, version string) error {
+	cv, err := getTxComponentVersion(tx, name, version)
+	if err != nil {
+		return err
+	}
+	for _, cfgName := range fetchTxBucketKeys(tx, bktConfigs) {
+		cfg, err := getTxConfiguration(tx, cfgName)
+		if err != nil {
+			return err
+		}
+		for _, l := range cfg.Layers {
+			if cv.Name == l.Name && cv.Version == l.Version {
+				return errors.Errorf("version is used by configuration %q", cfg.Name)
+			}
+		}
+	}
+	return cv.delete(tx)
 }
 
 // Configuration represents configuration data
@@ -667,6 +715,8 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		return nil
 	case "addver":
 		return tr.handleAddVersion(term, args)
+	case "delver":
+		return tr.handleDelVersion(term, args)
 	case "addconf":
 		return tr.handleAddConfiguration(term, args)
 	case "changeconf":
@@ -684,6 +734,7 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		"changeconf", "showconf",
 		"components", "configurations",
 		"showcomp",
+		"delver",
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
@@ -826,6 +877,25 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 	return multiUpdate(tr.db, cfg.save)
 }
 
+func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name    string `flag:"name,component name"`
+		Version string `flag:"version,unique version id"`
+	}{}
+	fs := flag.NewFlagSet("delver", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" || args.Version == "" {
+		return errors.New("invalid command arguments")
+	}
+	return tr.db.Update(func(tx *bolt.Tx) error {
+		return delComponentVersion(tx, args.Name, args.Version)
+	})
+}
+
 func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	args := struct {
 		Name    string `flag:"name,component name"`
@@ -860,6 +930,7 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 		Hash:    args.Hash,
 		Ctime:   time.Now().UTC(),
 	}
+	_ = os.MkdirAll(filepath.Join(tr.dir, filesDir), 0700)
 	if err := os.Rename(tname, filepath.Join(tr.dir, filesDir, args.Hash)); err != nil {
 		return err // TODO: don't output real error message here?
 	}
@@ -969,8 +1040,31 @@ func addFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
 	return saveTxKey(tx, data, bktFiles, hash)
 }
 
+func delFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
+	var references []fileReference
+	data := fetchTxKey(tx, bktFiles, hash)
+	if data == nil {
+		return nil
+	}
+	if err := json.Unmarshal(data, &references); err != nil {
+		return errors.WithStack(err)
+	}
+	newRef := references[:0]
+	for _, r := range references {
+		if r != ref {
+			newRef = append(newRef, r)
+		}
+	}
+	data, err := json.Marshal(newRef)
+	if err != nil {
+		return err
+	}
+	return saveTxKey(tx, data, bktFiles, hash)
+}
+
 const verboseHelp = `
 addver          add new component version from previously uploaded file
+delver          delete component version
 addconf         add new configuration from existing component versions
 changeconf      update single layer in existing configuration
 showconf        show configuration
