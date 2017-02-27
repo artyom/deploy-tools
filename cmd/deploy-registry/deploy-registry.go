@@ -65,6 +65,7 @@ const (
 	bktByTime     = "byTime"
 	bktComponents = "components"
 	bktConfigs    = "configs"
+	bktFiles      = "files"
 	keyCurrent    = "current"
 )
 
@@ -480,6 +481,25 @@ func (cv *ComponentVersion) byTimeKey() string {
 	return string(b)
 }
 
+func (cv *ComponentVersion) save(tx *bolt.Tx) error {
+	val, err := json.Marshal(cv)
+	if err != nil {
+		return err
+	}
+	err = saveTxKey(tx, val, bktComponents, cv.Name, bktByVersion, cv.Version)
+	if err != nil {
+		return err
+	}
+	err = saveTxKey(tx, val, bktComponents, cv.Name, bktByTime, cv.byTimeKey())
+	if err != nil {
+		return err
+	}
+	return addFileReference(tx, cv.Hash, fileReference{
+		Component: cv.Name,
+		Version:   cv.Version,
+	})
+}
+
 // Configuration represents configuration data
 type Configuration struct {
 	Name   string
@@ -843,17 +863,7 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	if err := os.Rename(tname, filepath.Join(tr.dir, filesDir, args.Hash)); err != nil {
 		return err // TODO: don't output real error message here?
 	}
-	val, err := json.Marshal(cv)
-	if err != nil {
-		return err
-	}
-	fn1 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, args.Name, bktByVersion, args.Version)
-	}
-	fn2 := func(tx *bolt.Tx) error {
-		return saveTxKey(tx, val, bktComponents, args.Name, bktByTime, cv.byTimeKey())
-	}
-	if err := multiUpdate(tr.db, fn1, fn2); err != nil {
+	if err := multiUpdate(tr.db, cv.save); err != nil {
 		return err
 	}
 	tr.mu.Lock()
@@ -932,6 +942,31 @@ func ptyRequestDimensions(b []byte) (width, height int) {
 	w := binary.BigEndian.Uint32(b)
 	h := binary.BigEndian.Uint32(b[4:])
 	return int(w), int(h)
+}
+
+// fileReference describes single component version which references file
+type fileReference struct {
+	Component, Version string
+}
+
+func addFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
+	var references []fileReference
+	if data := fetchTxKey(tx, bktFiles, hash); data != nil {
+		if err := json.Unmarshal(data, &references); err != nil {
+			return err
+		}
+	}
+	for _, r := range references {
+		if r == ref {
+			return nil
+		}
+	}
+	references = append(references, ref)
+	data, err := json.Marshal(references)
+	if err != nil {
+		return err
+	}
+	return saveTxKey(tx, data, bktFiles, hash)
 }
 
 const verboseHelp = `
