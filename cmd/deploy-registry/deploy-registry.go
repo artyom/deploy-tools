@@ -33,12 +33,7 @@ import (
 )
 
 func main() {
-	args := struct {
-		Addr    string `flag:"addr,address to listen"`
-		Dir     string `flag:"dir,data directory"`
-		OpAuth  string `flag:"opauth,authorized_keys for operators"`
-		SrvAuth string `flag:"srvauth,authorized_keys for services"`
-	}{
+	args := runConf{
 		Addr:    "localhost:2022",
 		Dir:     ".",
 		OpAuth:  "operator.keys",
@@ -46,16 +41,16 @@ func main() {
 	}
 	autoflags.Define(&args)
 	flag.Parse()
-	if err := run(runConf(args)); err != nil {
+	if err := run(args); err != nil {
 		log.Fatal(err)
 	}
 }
 
 type runConf struct {
-	Addr    string
-	Dir     string
-	OpAuth  string
-	SrvAuth string
+	Addr    string `flag:"addr,address to listen"`
+	Dir     string `flag:"dir,data directory"`
+	OpAuth  string `flag:"opauth,authorized_keys for operators"`
+	SrvAuth string `flag:"srvauth,authorized_keys for services"`
 }
 
 const (
