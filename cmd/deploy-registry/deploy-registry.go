@@ -655,6 +655,8 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		return tr.handleUpdateConfiguration(term, args)
 	case "showconf":
 		return tr.handleShowConfiguration(term, args)
+	case "showcomp":
+		return tr.handleShowComponent(term, args)
 	case "components":
 		return tr.handleShowBucketKeys(term, bktComponents)
 	case "configurations":
@@ -663,16 +665,17 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	knownCommands := []string{"help", "addver", "addconf",
 		"changeconf", "showconf",
 		"components", "configurations",
+		"showcomp",
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
 	return nil
 }
 
-func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketName string) error {
+func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketAddr ...string) error {
 	var keys []string
 	err := tr.db.View(func(tx *bolt.Tx) error {
-		keys = fetchTxBucketKeys(tx, bucketName)
+		keys = fetchTxBucketKeys(tx, bucketAddr...)
 		return nil
 	})
 	if err != nil {
@@ -682,6 +685,35 @@ func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketName string) error {
 		fmt.Fprintln(w, name)
 	}
 	return nil
+}
+
+func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
+	args := struct {
+		Name    string `flag:"name,component name"`
+		Verbose bool   `flag:"v,show extra details"`
+	}{}
+	fs := flag.NewFlagSet("showcomp", flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, &args)
+	if fs.Parse(rawArgs) != nil {
+		return nil // flagset already wrote error to term
+	}
+	if args.Name == "" {
+		return errors.New("invalid command arguments")
+	}
+	var keys []string
+	err := tr.db.View(func(tx *bolt.Tx) error {
+		keys = fetchTxBucketKeys(tx, bktComponents, args.Name, bktByTime)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
+	for _, name := range keys {
+		fmt.Fprintln(tw, strings.Replace(name, "#", "\t", 1))
+	}
+	return tw.Flush()
 }
 
 func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error {
@@ -910,6 +942,7 @@ addver          add new component version from previously uploaded file
 addconf         add new configuration from existing component versions
 changeconf      update single layer in existing configuration
 showconf        show configuration
+showcomp        show component versions
 components      show list of all known components
 configurations  show list of all known configurations
 
