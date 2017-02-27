@@ -75,8 +75,9 @@ func run(args runConf) error {
 	if err != nil {
 		return err
 	}
+	log := log.New(os.Stderr, "", log.LstdFlags)
 	log.Println("host key fingerprint:", ssh.FingerprintSHA256(hostKey.PublicKey()))
-	tr, err := newTracker(filepath.Join(args.Dir, "state.db"), args.Dir)
+	tr, err := newTracker(filepath.Join(args.Dir, "state.db"), args.Dir, log)
 	if err != nil {
 		return err
 	}
@@ -333,7 +334,7 @@ func (tr *tracker) openConfig(name string) (io.ReaderAt, error) {
 	return bytes.NewReader(data), nil
 }
 
-func newTracker(name, dir string) (*tracker, error) {
+func newTracker(name, dir string, log Logger) (*tracker, error) {
 	db, err := bolt.Open(name, 0600, &bolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, err
@@ -348,7 +349,7 @@ func newTracker(name, dir string) (*tracker, error) {
 		cancel:  cancel,
 	}
 	go tr.cleanUploads(ctx)
-	go cleanVersions(ctx, tr.db, 10, time.Hour, nil)
+	go cleanVersions(ctx, tr.db, 10, time.Hour, log)
 	return tr, nil
 }
 
