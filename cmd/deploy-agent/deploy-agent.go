@@ -247,7 +247,7 @@ func unpackLayers(ctx context.Context, dst, filesDir string, layers []layer) err
 	touchfile := dst + ".ok"
 	if _, err := os.Stat(touchfile); err == nil {
 		if _, err := os.Stat(dst); err == nil {
-			return err
+			return nil
 		}
 	}
 	if err := os.MkdirAll(dst, 0750); err != nil {
