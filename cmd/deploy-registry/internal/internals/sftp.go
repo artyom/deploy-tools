@@ -83,7 +83,10 @@ func (h *downloadHandler) Fileinfo(r sftp.Request) ([]os.FileInfo, error) { retu
 func (h *downloadHandler) Fileread(r sftp.Request) (io.ReaderAt, error)   { return h.fileReadFunc(r) }
 func (h *downloadHandler) Filewrite(r sftp.Request) (io.WriterAt, error)  { return nil, syscall.EPERM }
 
+// FileInfoFunc is a function from sftp.FileInfoer interface
 type FileInfoFunc func(sftp.Request) ([]os.FileInfo, error)
+
+// FileReadFunc is a function from sftp.FileReader interface
 type FileReadFunc func(sftp.Request) (io.ReaderAt, error)
 
 // newWriterAt creates temporary file in a given directory and returns
@@ -130,8 +133,14 @@ func fileHash(f io.ReadSeeker) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
-// File implements both os.FileInfo and io.ReaderAt interfaces
-type File struct {
+// SftpFile combines interfaces required for sftp virtual file implementations
+type SftpFile interface {
+	os.FileInfo
+	io.ReaderAt
+}
+
+// file implements both os.FileInfo and io.ReaderAt interfaces
+type file struct {
 	name  string
 	bytes []byte
 	rdat  io.ReaderAt
@@ -141,8 +150,8 @@ type File struct {
 }
 
 // NewFile creates new virtual file
-func NewFile(name string, dir bool, mtime time.Time, data []byte, sys *syscall.Stat_t) *File {
-	f := &File{
+func NewFile(name string, dir bool, mtime time.Time, data []byte, sys *syscall.Stat_t) SftpFile {
+	f := &file{
 		name: filepath.Base(name),
 		time: mtime,
 		sys:  sys,
@@ -156,14 +165,14 @@ func NewFile(name string, dir bool, mtime time.Time, data []byte, sys *syscall.S
 	return f
 }
 
-func (f *File) Name() string       { return f.name }
-func (f *File) Size() int64        { return int64(len(f.bytes)) }
-func (f *File) Mode() os.FileMode  { return f.mode }
-func (f *File) ModTime() time.Time { return f.time }
-func (f *File) IsDir() bool        { return f.mode.IsDir() }
-func (f *File) Sys() interface{}   { return f.sys }
+func (f *file) Name() string       { return f.name }
+func (f *file) Size() int64        { return int64(len(f.bytes)) }
+func (f *file) Mode() os.FileMode  { return f.mode }
+func (f *file) ModTime() time.Time { return f.time }
+func (f *file) IsDir() bool        { return f.mode.IsDir() }
+func (f *file) Sys() interface{}   { return f.sys }
 
-func (f *File) ReadAt(p []byte, off int64) (int, error) {
+func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	if f.rdat == nil || f.mode.IsDir() {
 		return 0, os.ErrInvalid
 	}

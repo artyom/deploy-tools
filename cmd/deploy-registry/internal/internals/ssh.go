@@ -47,7 +47,7 @@ func readAuthorizedKeys(name string) ([]keyMeta, error) {
 
 const serviceUserName = "deploy-agent"
 
-func AuthChecker(opAuth, srvAuth string) (func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error), error) {
+func authChecker(opAuth, srvAuth string) (func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error), error) {
 	opAuthKeys, err := readAuthorizedKeys(opAuth)
 	if err != nil {
 		return nil, err
@@ -76,6 +76,8 @@ func AuthChecker(opAuth, srvAuth string) (func(conn ssh.ConnMetadata, key ssh.Pu
 	}, nil
 }
 
+// IsServiceUser returns true if Permissions are created for service
+// (deploy-agent) user that should only have read-only access.
 func IsServiceUser(p *ssh.Permissions) bool {
 	_, ok := p.CriticalOptions[serviceUserName]
 	return ok
@@ -146,7 +148,7 @@ func writePrivateKey(name string, pemBytes []byte) error {
 // srvAuth, reads or creates private key from keyFile and sets up
 // ssh.ServerConfig using public key authentication.
 func ServerSetup(keyFile, opAuth, srvAuth string) (ssh.Signer, *ssh.ServerConfig, error) {
-	publicKeyCallback, err := AuthChecker(opAuth, srvAuth)
+	publicKeyCallback, err := authChecker(opAuth, srvAuth)
 	if err != nil {
 		return nil, nil, err
 	}
