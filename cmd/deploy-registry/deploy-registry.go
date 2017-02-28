@@ -34,10 +34,12 @@ import (
 
 func main() {
 	args := runConf{
-		Addr:    "localhost:2022",
-		Dir:     ".",
-		OpAuth:  "operator.keys",
-		SrvAuth: "service.keys",
+		Addr:         "localhost:2022",
+		Dir:          ".",
+		OpAuth:       "operator.keys",
+		SrvAuth:      "service.keys",
+		KeepVersions: 10,
+		Deadline:     30 * time.Minute,
 	}
 	autoflags.Define(&args)
 	flag.Parse()
@@ -51,6 +53,9 @@ type runConf struct {
 	Dir     string `flag:"dir,data directory"`
 	OpAuth  string `flag:"opauth,authorized_keys for operators"`
 	SrvAuth string `flag:"srvauth,authorized_keys for services"`
+
+	KeepVersions int           `flag:"maxver,max.number of component versions to keep"`
+	Deadline     time.Duration `flag:"deadline,max.lifetime of TCP connection"`
 }
 
 const (
@@ -66,13 +71,13 @@ const (
 )
 
 func run(args runConf) error {
-	hostKey, config, err := internals.ServerSetup(filepath.Join(args.Dir, "id_ecdsa"), args.OpAuth, args.SrvAuth)
+	hostKey, config, err := internals.ServerSetup(filepath.Join(args.Dir, "host_key"), args.OpAuth, args.SrvAuth)
 	if err != nil {
 		return err
 	}
 	log := log.New(os.Stderr, "", log.LstdFlags)
 	log.Println("host key fingerprint:", ssh.FingerprintSHA256(hostKey.PublicKey()))
-	tr, err := newTracker(filepath.Join(args.Dir, "state.db"), args.Dir, log)
+	tr, err := newTracker(args.Dir, args.KeepVersions, log)
 	if err != nil {
 		return err
 	}
@@ -89,7 +94,9 @@ func run(args runConf) error {
 			return err
 		}
 		go func(conn net.Conn) {
-			_ = conn.SetDeadline(time.Now().Add(5 * time.Minute)) // TODO
+			if args.Deadline > 5*time.Minute {
+				_ = conn.SetDeadline(time.Now().Add(args.Deadline))
+			}
 			if c, ok := conn.(*net.TCPConn); ok {
 				c.SetKeepAlive(true)
 				c.SetKeepAlivePeriod(3 * time.Minute)
@@ -329,8 +336,8 @@ func (tr *tracker) openConfig(name string) (io.ReaderAt, error) {
 	return bytes.NewReader(data), nil
 }
 
-func newTracker(name, dir string, log Logger) (*tracker, error) {
-	db, err := bolt.Open(name, 0600, &bolt.Options{Timeout: time.Second})
+func newTracker(dir string, keepVersions int, log Logger) (*tracker, error) {
+	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, &bolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +351,7 @@ func newTracker(name, dir string, log Logger) (*tracker, error) {
 		cancel:  cancel,
 	}
 	go tr.cleanUploads(ctx, 30*time.Minute)
-	go cleanVersions(ctx, tr.db, 10, time.Hour, log)
+	go cleanVersions(ctx, tr.db, keepVersions, time.Hour, log)
 	go cleanUnreferencedFiles(ctx, tr.db, filepath.Join(dir, filesDir), 3*time.Hour, log)
 	return tr, nil
 }
