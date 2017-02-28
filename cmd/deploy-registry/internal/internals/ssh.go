@@ -156,6 +156,7 @@ func ServerSetup(keyFile, opAuth, srvAuth string) (ssh.Signer, *ssh.ServerConfig
 	}
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: publicKeyCallback,
+		ServerVersion:     "SSH-2.0-generic",
 	}
 	config.AddHostKey(hostKey)
 	return hostKey, config, nil
