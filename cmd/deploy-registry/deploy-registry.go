@@ -170,7 +170,9 @@ func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *
 				case nil:
 					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{0}))
 				default:
-					fmt.Fprintln(sshCh, err)
+					if err != errNonZeroResult {
+						fmt.Fprintln(sshCh, err)
+					}
 					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{1}))
 				}
 			}()
@@ -921,6 +923,10 @@ func handleExec(tr *tracker, rw io.ReadWriter, cmd string) error {
 	return tr.handleTerminalCommand(rw, args)
 }
 
+// errNonZeroResult is returned by command handle functions when they need to
+// signal non-success result but already done reporting by themselves
+var errNonZeroResult = errors.New("unsuccessful command result")
+
 func serveTerminal(tr *tracker, width, height int, rw io.ReadWriter) error {
 	term := terminal.NewTerminal(rw, "> ")
 	if width > 0 && height > 0 {
@@ -944,7 +950,7 @@ func serveTerminal(tr *tracker, width, height int, rw io.ReadWriter) error {
 			fmt.Fprintln(term, err)
 			continue
 		}
-		if err := tr.handleTerminalCommand(term, args); err != nil {
+		if err := tr.handleTerminalCommand(term, args); err != nil && err != errNonZeroResult {
 			fmt.Fprintln(term, err)
 		}
 	}
@@ -989,7 +995,7 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	}
 	fmt.Fprintln(term, "Unknown command, supported commands are:")
 	fmt.Fprintln(term, strings.Join(knownCommands, ", "))
-	return nil
+	return errNonZeroResult
 }
 
 func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketAddr ...string) error {
@@ -1015,7 +1021,7 @@ func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" {
 		return errors.New("invalid command arguments")
@@ -1044,7 +1050,7 @@ func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error 
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" {
 		return errors.New("invalid command arguments")
@@ -1077,7 +1083,7 @@ func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) erro
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" || args.Comp == "" || args.Ver == "" {
 		return errors.New("invalid command arguments")
@@ -1108,7 +1114,7 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" || len(args.Layers) == 0 {
 		return errors.New("invalid command arguments")
@@ -1137,7 +1143,7 @@ func (tr *tracker) handleDelConfiguration(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" {
 		return errors.New("invalid command arguments")
@@ -1158,7 +1164,7 @@ func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" {
 		return errors.New("invalid command arguments")
@@ -1177,7 +1183,7 @@ func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" || args.Version == "" {
 		return errors.New("invalid command arguments")
@@ -1197,7 +1203,7 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	fs.SetOutput(w)
 	autoflags.DefineFlagSet(fs, &args)
 	if fs.Parse(rawArgs) != nil {
-		return nil // flagset already wrote error to term
+		return errNonZeroResult
 	}
 	if args.Name == "" || args.Version == "" || args.Hash == "" {
 		return errors.New("invalid command arguments")
