@@ -1135,6 +1135,9 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 	if args.Name == "" || len(args.Layers) == 0 {
 		return errors.New("invalid command arguments")
 	}
+	if strings.ContainsRune(args.Name, '/') {
+		return errors.New("configuration name cannot contain /")
+	}
 	var layers []*ComponentVersion
 	for _, l := range args.Layers {
 		cv, err := getComponentVersion(tr.db, l.comp, l.ver)
