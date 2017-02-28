@@ -397,6 +397,9 @@ func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duratio
 	if keep < 1 || scan <= 0 {
 		return
 	}
+	if min := 10 * time.Minute; scan < min {
+		scan = min
+	}
 	fn := func(tx *bolt.Tx) error {
 		type compVer struct {
 			c, v string
@@ -458,6 +461,9 @@ func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duratio
 func cleanUnreferencedFiles(ctx context.Context, db *bolt.DB, dir string, scan time.Duration, log Logger) {
 	if scan <= 0 {
 		return
+	}
+	if min := 10 * time.Minute; scan < min {
+		scan = min
 	}
 	fn := func(tx *bolt.Tx) error {
 		for _, hash := range fetchTxBucketKeys(tx, bktFiles) {
