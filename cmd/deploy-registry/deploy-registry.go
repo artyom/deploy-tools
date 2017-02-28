@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
@@ -88,9 +89,14 @@ func run(args runConf) error {
 		return err
 	}
 	defer ln.Close()
+	go closeOnSignal(ln, log, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		conn, err := ln.Accept()
-		if err != nil {
+		switch {
+		case err == nil:
+		case isClosed(err): // closed on signal, consider graceful shutdown
+			return nil
+		default:
 			return err
 		}
 		go func(conn net.Conn) {
@@ -1357,6 +1363,23 @@ func delFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
 		return err
 	}
 	return saveTxKey(tx, data, bktFiles, hash)
+}
+
+func closeOnSignal(c io.Closer, log Logger, sig ...os.Signal) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, sig...)
+	defer signal.Stop(sigCh)
+	if s := <-sigCh; log != nil {
+		log.Println(s)
+	}
+	c.Close()
+}
+
+func isClosed(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "use of closed network connection")
 }
 
 // Logger describes set of methods used for logging. *log.Logger from standard
