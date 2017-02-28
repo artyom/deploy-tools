@@ -27,6 +27,7 @@ import (
 
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/cmd/deploy-registry/internal/internals"
+	"github.com/artyom/logger"
 	"github.com/boltdb/bolt"
 	shellwords "github.com/mattn/go-shellwords"
 	"github.com/pkg/errors"
@@ -362,7 +363,7 @@ func (tr *tracker) openConfig(name string) (io.ReaderAt, error) {
 	return bytes.NewReader(data), nil
 }
 
-func newTracker(dir string, keepVersions int, log Logger) (*tracker, error) {
+func newTracker(dir string, keepVersions int, log logger.Interface) (*tracker, error) {
 	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, &bolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, err
@@ -426,7 +427,7 @@ func (tr *tracker) cleanUploads(ctx context.Context, maxAge time.Duration) {
 
 // cleanVersions removes unreferenced component versions exceeding keep number,
 // scanning each scan.
-func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duration, log Logger) {
+func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duration, log logger.Interface) {
 	if keep < 1 || scan <= 0 {
 		return
 	}
@@ -491,7 +492,7 @@ func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duratio
 }
 
 // cleanUnreferencedFiles removes files with zero references.
-func cleanUnreferencedFiles(ctx context.Context, db *bolt.DB, dir string, scan time.Duration, log Logger) {
+func cleanUnreferencedFiles(ctx context.Context, db *bolt.DB, dir string, scan time.Duration, log logger.Interface) {
 	if scan <= 0 {
 		return
 	}
@@ -1365,7 +1366,7 @@ func delFileReference(tx *bolt.Tx, hash string, ref fileReference) error {
 	return saveTxKey(tx, data, bktFiles, hash)
 }
 
-func closeOnSignal(c io.Closer, log Logger, sig ...os.Signal) {
+func closeOnSignal(c io.Closer, log logger.Interface, sig ...os.Signal) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, sig...)
 	defer signal.Stop(sigCh)
@@ -1380,14 +1381,6 @@ func isClosed(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "use of closed network connection")
-}
-
-// Logger describes set of methods used for logging. *log.Logger from standard
-// library implements this interface.
-type Logger interface {
-	Print(v ...interface{})
-	Printf(format string, v ...interface{})
-	Println(v ...interface{})
 }
 
 const verboseHelp = `
