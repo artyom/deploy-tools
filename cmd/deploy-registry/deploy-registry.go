@@ -345,6 +345,7 @@ func newTracker(name, dir string, log Logger) (*tracker, error) {
 	}
 	go tr.cleanUploads(ctx)
 	go cleanVersions(ctx, tr.db, 10, time.Hour, log)
+	go cleanUnreferencedFiles(ctx, tr.db, filepath.Join(dir, filesDir), 3*time.Hour, log)
 	return tr, nil
 }
 
@@ -443,6 +444,40 @@ func cleanVersions(ctx context.Context, db *bolt.DB, keep int, scan time.Duratio
 		case <-ticker.C:
 			if err := db.Update(fn); err != nil && log != nil {
 				log.Println("error removing excess versions:", err)
+			}
+		}
+	}
+}
+
+// cleanUnreferencedFiles removes files with zero references.
+func cleanUnreferencedFiles(ctx context.Context, db *bolt.DB, dir string, scan time.Duration, log Logger) {
+	if scan <= 0 {
+		return
+	}
+	fn := func(tx *bolt.Tx) error {
+		for _, hash := range fetchTxBucketKeys(tx, bktFiles) {
+			refBytes := fetchTxKey(tx, bktFiles, hash)
+			// cheat a bit: don't unmarshal, compare directly to
+			// empty slice json representations
+			if !bytes.Equal(refBytes, []byte("[]")) && !bytes.Equal(refBytes, []byte("null")) {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dir, hash))
+			if err := delTxKey(tx, bktFiles, hash); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ticker := time.NewTicker(scan)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := db.Update(fn); err != nil && log != nil {
+				log.Println("error removing unreferenced files:", err)
 			}
 		}
 	}
