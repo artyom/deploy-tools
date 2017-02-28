@@ -156,6 +156,24 @@ func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *
 	for req := range requests {
 		var ok bool
 		switch {
+		case req.Type == "exec": // https://tools.ietf.org/html/rfc4254#section-6.5
+			if len(req.Payload) <= 4 {
+				req.Reply(false, nil)
+				continue
+			}
+			ok = true
+			go func() {
+				defer sshCh.Close()      // SSH_MSG_CHANNEL_CLOSE
+				defer sshCh.CloseWrite() // SSH_MSG_CHANNEL_EOF
+				defer sshCh.SendRequest("eow@openssh.com", false, nil)
+				switch err := handleExec(tr, sshCh, string(req.Payload[4:])); err {
+				case nil:
+					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{0}))
+				default:
+					fmt.Fprintln(sshCh, err)
+					sshCh.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{1}))
+				}
+			}()
 		case req.Type == "pty-req":
 			// TODO: handle "window-change" as well
 			width, height = ptyRequestDimensions(req.Payload)
@@ -893,6 +911,14 @@ func getTxComponentVersion(tx *bolt.Tx, component, version string) (*ComponentVe
 		return nil, err
 	}
 	return &cv, nil
+}
+
+func handleExec(tr *tracker, rw io.ReadWriter, cmd string) error {
+	args, err := shellwords.Parse(cmd)
+	if err != nil {
+		return err
+	}
+	return tr.handleTerminalCommand(rw, args)
 }
 
 func serveTerminal(tr *tracker, width, height int, rw io.ReadWriter) error {
