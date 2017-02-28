@@ -591,7 +591,12 @@ func delTxKey(tx *bolt.Tx, addr ...string) error {
 			return nil
 		}
 	}
-	return errors.WithStack(bkt.Delete([]byte(addr[len(addr)-1])))
+	key := []byte(addr[len(addr)-1])
+	err := bkt.Delete(key)
+	if err == bolt.ErrIncompatibleValue {
+		err = bkt.DeleteBucket(key)
+	}
+	return errors.WithStack(err)
 }
 
 // fetchKey retrieves value from provided database. Value address specified with
