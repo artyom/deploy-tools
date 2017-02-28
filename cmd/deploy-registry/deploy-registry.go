@@ -343,11 +343,15 @@ func (tr *tracker) openFile(base string) (readerAtCloser, error) {
 
 func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
 	rPath := path.Clean(r.Filepath)
-	if ok, err := path.Match("/files/?*", rPath); ok && err == nil {
-		return tr.openFile(path.Base(rPath))
+	for _, pat := range []string{"/files/?*", "files/?*"} {
+		if ok, err := path.Match(pat, rPath); ok && err == nil {
+			return tr.openFile(path.Base(rPath))
+		}
 	}
-	if ok, err := path.Match("/configs/?*.json", rPath); ok && err == nil {
-		return tr.openConfig(strings.TrimSuffix(path.Base(rPath), ".json"))
+	for _, pat := range []string{"/configs/?*.json", "configs/?*.json"} {
+		if ok, err := path.Match(pat, rPath); ok && err == nil {
+			return tr.openConfig(strings.TrimSuffix(path.Base(rPath), ".json"))
+		}
 	}
 	return nil, syscall.ENOENT
 }
