@@ -343,7 +343,7 @@ func newTracker(name, dir string, log Logger) (*tracker, error) {
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 		cancel:  cancel,
 	}
-	go tr.cleanUploads(ctx)
+	go tr.cleanUploads(ctx, 30*time.Minute)
 	go cleanVersions(ctx, tr.db, 10, time.Hour, log)
 	go cleanUnreferencedFiles(ctx, tr.db, filepath.Join(dir, filesDir), 3*time.Hour, log)
 	return tr, nil
@@ -351,8 +351,13 @@ func newTracker(name, dir string, log Logger) (*tracker, error) {
 
 // cleanUploads periodically checks uploads directory and removes orphaned files
 // that were uploaded but were not assigned to any components
-func (tr *tracker) cleanUploads(ctx context.Context) {
-	maxAge := 30 * time.Minute
+func (tr *tracker) cleanUploads(ctx context.Context, maxAge time.Duration) {
+	if maxAge <= 0 {
+		return
+	}
+	if min := 5 * time.Minute; maxAge < min {
+		maxAge = min
+	}
 	fn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
