@@ -182,13 +182,18 @@ func runDeploy(ctx context.Context, script, dir string, oldState, newState *conf
 	}
 	defer os.Remove(stateFile)
 	cmd := exec.CommandContext(ctx, script)
-	cmd.Env = append(os.Environ(),
-		"OLDID="+oldState.Hash,
-		"OLDROOT="+filepath.Join(dir, oldState.Hash),
-		"NEWID="+newState.Hash,
-		"NEWROOT="+filepath.Join(dir, newState.Hash),
-		"STATEFILE="+stateFile,
-	)
+	cmd.Env = []string{
+		"OLDID=" + oldState.Hash,
+		"OLDROOT=" + filepath.Join(dir, oldState.Hash),
+		"NEWID=" + newState.Hash,
+		"NEWROOT=" + filepath.Join(dir, newState.Hash),
+		"STATEFILE=" + stateFile,
+	}
+	for _, name := range []string{"PATH", "HOME", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL"} {
+		if val, ok := os.LookupEnv(name); ok {
+			cmd.Env = append(cmd.Env, name+"="+val)
+		}
+	}
 	for i, l := range newState.Layers {
 		cmd.Env = append(cmd.Env,
 			fmt.Sprintf("LAYER_%d_NAME=%s", i, l.Name),
