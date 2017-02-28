@@ -203,7 +203,7 @@ type tracker struct {
 	// name
 	uploads map[string]string
 	// files holds references to open files from filesDir
-	files map[string]ReaderAtCloser
+	files map[string]readerAtCloser
 
 	st     *syscall.Stat_t // used to attach to virtual files
 	cancel func()
@@ -294,7 +294,7 @@ func (tr *tracker) listDirs(reqPath string) ([]os.FileInfo, error) {
 	return []os.FileInfo{statConfigs, statFiles}, nil
 }
 
-func (tr *tracker) openFile(base string) (ReaderAtCloser, error) {
+func (tr *tracker) openFile(base string) (readerAtCloser, error) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	r, ok := tr.files[base]
@@ -346,7 +346,7 @@ func newTracker(dir string, keepVersions int, log Logger) (*tracker, error) {
 		db:      db,
 		dir:     dir,
 		uploads: make(map[string]string),
-		files:   make(map[string]ReaderAtCloser),
+		files:   make(map[string]readerAtCloser),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 		cancel:  cancel,
 	}
@@ -1219,7 +1219,7 @@ func isSftpRequest(req *ssh.Request) bool {
 	return req.Type == "subsystem" && len(req.Payload) > 4 && string(req.Payload[4:]) == "sftp"
 }
 
-type ReaderAtCloser interface {
+type readerAtCloser interface {
 	io.ReaderAt
 	io.Closer
 }
