@@ -94,7 +94,7 @@ func run(args runConf) error {
 				c.SetKeepAlive(true)
 				c.SetKeepAlivePeriod(3 * time.Minute)
 			}
-			if err := serveConn(conn, config, tr); err != nil {
+			if err := serveConn(conn, config, tr); err != nil && errors.Cause(err) != io.EOF {
 				log.Printf("%+v", err)
 			}
 		}(conn)
