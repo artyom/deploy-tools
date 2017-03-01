@@ -22,11 +22,19 @@ import (
 )
 
 func main() {
-	args := &runArgs{}
+	args := &runArgs{
+		Addr: os.Getenv("DEPLOYCTL_ADDR"),
+		Fp:   os.Getenv("DEPLOYCTL_FINGERPRINT"),
+	}
 	fs := flag.NewFlagSet("deployctl", flag.ExitOnError)
 	fs.Usage = usageFunc(fs.PrintDefaults)
 	autoflags.DefineFlagSet(fs, args)
 	fs.Parse(os.Args[1:])
+	if err := args.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
+		fs.Usage()
+		os.Exit(2)
+	}
 	if len(fs.Args()) == 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -200,8 +208,15 @@ func parseArgs(command string, argStruct validator, w io.Writer, raw []string) e
 }
 
 type runArgs struct {
-	Addr string `flag:"addr,registry host address (host:port)"`
-	Fp   string `flag:"fp,registry host key fingerprint (sha256:...)"`
+	Addr string `flag:"addr,$DEPLOYCTL_ADDR, registry host address (host:port)"`
+	Fp   string `flag:"fp,$DEPLOYCTL_FINGERPRINT, sha256 host key fingerprint (sha256:...)"`
+}
+
+func (a *runArgs) Validate() error {
+	if a.Addr == "" || a.Fp == "" {
+		return errors.New("both addr and fp should be set")
+	}
+	return nil
 }
 
 func usageFunc(printDefaults func()) func() {
