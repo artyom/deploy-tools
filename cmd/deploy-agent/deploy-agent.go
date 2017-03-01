@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -37,6 +38,7 @@ func main() {
 		Addr:   "localhost:2022",
 		Dir:    ".",
 		Script: "./deploy.sh",
+		Poll:   30 * time.Second,
 	}
 	autoflags.Parse(args)
 	log := log.New(os.Stderr, "", log.LstdFlags)
@@ -46,15 +48,16 @@ func main() {
 }
 
 type mainArgs struct {
-	State    string `flag:"state,file to save state to"`
-	Name     string `flag:"name,configuration to track"`
-	Key      string `flag:"key,ssh private key to use"`
-	Addr     string `flag:"addr,registry address (host:port)"`
-	Fp       string `flag:"fp,registry server key fingerprint"`
-	Dir      string `flag:"dir,directory to store downloaded and unpacked files"`
-	Script   string `flag:"script,script to run on deploys"`
-	CleanOld bool   `flag:"cleanold,try to remove previous state unpacked files after switching state"`
-	Verbose  bool   `flag:"v,be more chatty about what's happening"`
+	State    string        `flag:"state,file to save state to"`
+	Name     string        `flag:"name,configuration to track"`
+	Key      string        `flag:"key,ssh private key to use"`
+	Addr     string        `flag:"addr,registry address (host:port)"`
+	Fp       string        `flag:"fp,registry server key fingerprint"`
+	Dir      string        `flag:"dir,directory to store downloaded and unpacked files"`
+	Script   string        `flag:"script,script to run on deploys"`
+	CleanOld bool          `flag:"cleanold,try to remove previous state unpacked files after switching state"`
+	Verbose  bool          `flag:"v,be more chatty about what's happening"`
+	Poll     time.Duration `flag:"poll,registry poll interval"`
 }
 
 func run(args *mainArgs, log logger.Interface) error {
@@ -68,6 +71,7 @@ func run(args *mainArgs, log logger.Interface) error {
 	if err != nil {
 		return err
 	}
+	waitfunc := pollRandomizer(args.Poll, 5)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go callOnSignal(func(s os.Signal) { log.Println(s); cancel() }, syscall.SIGINT, syscall.SIGTERM)
@@ -76,7 +80,7 @@ func run(args *mainArgs, log logger.Interface) error {
 			log.Println(err)
 		}
 		select {
-		case <-time.After(15 * time.Second):
+		case <-waitfunc():
 		case <-ctx.Done():
 			return nil
 		}
@@ -421,3 +425,19 @@ const (
 	unpackedDir  = "unpacked"
 	tempDlPrefix = "temp-"
 )
+
+// pollRandomizer returns function calling time.After(...) on base duration
+// randomized by adding up to n seconds to it. Returned function is unsafe for
+// concurrent use.
+func pollRandomizer(base time.Duration, n int) func() <-chan time.Time {
+	if base < 0 {
+		base = 15 * time.Second
+	}
+	if n <= 0 {
+		n = 1
+	}
+	r := rand.New(rand.NewSource(int64(os.Getpid())))
+	return func() <-chan time.Time {
+		return time.After(base + time.Duration(r.Intn(n))*time.Second)
+	}
+}

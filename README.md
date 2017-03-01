@@ -201,6 +201,8 @@ Script receives configuration state via the following environment variables:
 		ssh private key to use (default "id_ecdsa")
 	  -name string
 		configuration to track
+	  -poll duration
+		registry poll interval (default 30s)
 	  -script string
 		script to run on deploys (default "./deploy.sh")
 	  -state string
