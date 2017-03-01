@@ -27,6 +27,7 @@ import (
 
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/cmd/deploy-registry/internal/internals"
+	"github.com/artyom/deploy-tools/internal/shared"
 	"github.com/artyom/logger"
 	"github.com/boltdb/bolt"
 	shellwords "github.com/mattn/go-shellwords"
@@ -1029,14 +1030,12 @@ func (tr *tracker) handleShowBucketKeys(w io.Writer, bucketAddr ...string) error
 }
 
 func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name string `flag:"name,component name"`
-	}{}
-	if parseArgs("showcomp", &args, w, rawArgs) != nil {
+	args := &shared.ArgsShowComponent{}
+	if parseArgs("showcomp", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	var keys []string
 	err := tr.db.View(func(tx *bolt.Tx) error {
@@ -1054,15 +1053,12 @@ func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
 }
 
 func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name    string `flag:"name,configuration name"`
-		Verbose bool   `flag:"v,show extra details"`
-	}{}
-	if parseArgs("showconf", &args, w, rawArgs) != nil {
+	args := &shared.ArgsShowConfiguration{}
+	if parseArgs("showconf", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	cfg, err := getConfiguration(tr.db, args.Name)
 	if err != nil {
@@ -1083,16 +1079,12 @@ func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error 
 }
 
 func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name string `flag:"name,configuration name"`
-		Comp string `flag:"component,component name to update"`
-		Ver  string `flag:"version,new version of selected component"`
-	}{}
-	if parseArgs("changeconf", &args, w, rawArgs) != nil {
+	args := &shared.ArgsUpdateConfiguration{}
+	if parseArgs("changeconf", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" || args.Comp == "" || args.Ver == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	fn := func(tx *bolt.Tx) error {
 		cv, err := getTxComponentVersion(tx, args.Comp, args.Ver)
@@ -1112,22 +1104,16 @@ func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) erro
 }
 
 func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name   string       `flag:"name,configuration name"`
-		Layers compVerSlice `flag:"layer,layer in component:version format; can be set multiple times"`
-	}{}
-	if parseArgs("addconf", &args, w, rawArgs) != nil {
+	args := &shared.ArgsAddConfiguration{}
+	if parseArgs("addconf", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" || len(args.Layers) == 0 {
-		return errors.New("invalid command arguments")
-	}
-	if strings.ContainsRune(args.Name, '/') {
-		return errors.New("configuration name cannot contain /")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	var layers []*ComponentVersion
 	for _, l := range args.Layers {
-		cv, err := getComponentVersion(tr.db, l.comp, l.ver)
+		cv, err := getComponentVersion(tr.db, l.Comp, l.Ver)
 		if err != nil {
 			return err
 		}
@@ -1141,15 +1127,12 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 }
 
 func (tr *tracker) handleDelConfiguration(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name  string `flag:"name,configuration name"`
-		Force bool   `flag:"force,remove configuration for real"`
-	}{}
-	if parseArgs("delconf", &args, w, rawArgs) != nil {
+	args := &shared.ArgsDelConfiguration{}
+	if parseArgs("delconf", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	if !args.Force {
 		return errors.New("Run command with -force flag to confirm removal")
@@ -1160,14 +1143,12 @@ func (tr *tracker) handleDelConfiguration(w io.Writer, rawArgs []string) error {
 }
 
 func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name string `flag:"name,component name"`
-	}{}
-	if parseArgs("delcomp", &args, w, rawArgs) != nil {
+	args := &shared.ArgsDelComponent{}
+	if parseArgs("delcomp", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	return tr.db.Update(func(tx *bolt.Tx) error {
 		return delComponent(tx, args.Name)
@@ -1175,15 +1156,12 @@ func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
 }
 
 func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name    string `flag:"name,component name"`
-		Version string `flag:"version,unique version id"`
-	}{}
-	if parseArgs("delver", &args, w, rawArgs) != nil {
+	args := &shared.ArgsDelVersion{}
+	if parseArgs("delver", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" || args.Version == "" {
-		return errors.New("invalid command arguments")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	return tr.db.Update(func(tx *bolt.Tx) error {
 		return delComponentVersion(tx, args.Name, args.Version)
@@ -1191,22 +1169,12 @@ func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
 }
 
 func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
-	args := struct {
-		Name    string `flag:"name,component name"`
-		Version string `flag:"version,unique version id"`
-		Hash    string `flag:"hash,sha256 content hash in hex representation (64 chars)"`
-	}{}
-	if parseArgs("addver", &args, w, rawArgs) != nil {
+	args := &shared.ArgsAddVersionByHash{}
+	if parseArgs("addver", args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
-	if args.Name == "" || args.Version == "" || args.Hash == "" {
-		return errors.New("invalid command arguments")
-	}
-	if strings.ContainsRune(args.Name, ':') {
-		return errors.New("component name cannot contain ':'")
-	}
-	if len(args.Hash) != 64 {
-		return errors.New("invalid hash specification")
+	if err := args.Validate(); err != nil {
+		return err
 	}
 	tr.mu.Lock()
 	tname, ok := tr.uploads[args.Hash]
@@ -1271,32 +1239,6 @@ func (of *openFile) ReadAt(p []byte, off int64) (int, error) { return of.f.ReadA
 func (of *openFile) Close() error {
 	of.once.Do(of.closeCallback)
 	return of.f.Close()
-}
-
-// compVer holds single layer specification as passed by operator
-type compVer struct {
-	comp, ver string
-}
-
-// compVerSlice implements flag.Value interface
-type compVerSlice []compVer
-
-func (c *compVerSlice) String() string { return "" }
-func (c *compVerSlice) Set(value string) error {
-	flds := strings.SplitN(value, ":", 2)
-	if len(flds) != 2 {
-		return errors.New("invalid value")
-	}
-	for _, v := range *c {
-		// XXX: this may not the best way to check for dupes, but
-		// normally number of layers is expected to be small, so leave
-		// this as is for now
-		if v.comp == flds[0] {
-			return errors.Errorf("duplicate component %q", flds[0])
-		}
-	}
-	*c = append(*c, compVer{comp: flds[0], ver: flds[1]})
-	return nil
 }
 
 // ptyRequestDimensions parses "pty-req" request payload as specified in
