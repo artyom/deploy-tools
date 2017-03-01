@@ -231,12 +231,3 @@ func usageFunc(printDefaults func()) func() {
 		fmt.Fprintln(os.Stderr, strings.TrimSpace(shared.CommandsListing))
 	}
 }
-
-var knownCommands = []string{"addver", "addconf",
-	"changeconf", "showconf",
-	"components", "configurations",
-	"showcomp",
-	"delver",
-	"delcomp",
-	"delconf",
-}
