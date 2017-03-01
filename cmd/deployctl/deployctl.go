@@ -245,7 +245,8 @@ func usageFunc(printDefaults func()) func() {
 	return func() {
 		fmt.Fprintln(os.Stderr, "Usage: deployctl [flags] subcommand [subcommand flags]")
 		printDefaults()
-		fmt.Fprintln(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintln(os.Stderr, "\nSubcommands:")
+		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, strings.TrimSpace(shared.CommandsListing))
 	}
 }
