@@ -195,15 +195,15 @@ func (c *compVerSlice) Set(value string) error {
 // short description
 const CommandsListing = `
 addver          add new component version from previously uploaded file
-delver          delete component version
-delcomp         delete the whole component
 addconf         add new configuration from existing component versions
-delconf         delete configuration
 changeconf      update single layer in existing configuration
 showconf        show configuration
 showcomp        show component versions
-components      show list of all known components
-configurations  show list of all known configurations
+components      list all known components
+configurations  list all known configurations
+delver          delete component version
+delcomp         delete all component versions
+delconf         delete configuration
 
 use -h flag to get more help on a specific command
 `
