@@ -202,6 +202,8 @@ func validatorForCommand(name string) (validator, error) {
 		return &shared.ArgsDelConfiguration{}, nil
 	case "changeconf":
 		return &shared.ArgsUpdateConfiguration{}, nil
+	case "bumpconf":
+		return &shared.ArgsBumpConfiguration{}, nil
 	case "showconf":
 		return &shared.ArgsShowConfiguration{}, nil
 	case "showcomp":

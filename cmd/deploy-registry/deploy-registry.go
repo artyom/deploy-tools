@@ -951,6 +951,27 @@ func getTxComponentVersion(tx *bolt.Tx, component, version string) (*ComponentVe
 	return &cv, nil
 }
 
+func getTxComponentLatestVersion(tx *bolt.Tx, name string) (*ComponentVersion, error) {
+	bkt := tx.Bucket([]byte(bktComponents))
+	if bkt == nil {
+		return nil, errors.New("no components found")
+	}
+	for _, key := range []string{name, bktByTime} {
+		if bkt = bkt.Bucket([]byte(key)); bkt == nil {
+			return nil, errors.Errorf("no component %q found", name)
+		}
+	}
+	_, data := bkt.Cursor().Last()
+	if data == nil {
+		return nil, errors.Errorf("no versions for component %q found", name)
+	}
+	var cv ComponentVersion
+	if err := json.Unmarshal(data, &cv); err != nil {
+		return nil, err
+	}
+	return &cv, nil
+}
+
 func handleExec(tr *tracker, rw io.ReadWriter, cmd string) error {
 	args, err := shellwords.Parse(cmd)
 	if err != nil {
@@ -1012,6 +1033,8 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 		return tr.handleAddConfiguration(term, args)
 	case "changeconf":
 		return tr.handleUpdateConfiguration(term, args)
+	case "bumpconf":
+		return tr.handleBumpConfiguration(term, args)
 	case "showconf":
 		return tr.handleShowConfiguration(term, args)
 	case "showcomp":
@@ -1096,6 +1119,31 @@ func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error 
 			l.Ctime.Format(time.RFC3339))
 	}
 	return tw.Flush()
+}
+
+func (tr *tracker) handleBumpConfiguration(w io.Writer, rawArgs []string) error {
+	args := &shared.ArgsBumpConfiguration{}
+	if parseArgs("bumpconf", args, w, rawArgs) != nil {
+		return errNonZeroResult
+	}
+	if err := args.Validate(); err != nil {
+		return err
+	}
+	fn := func(tx *bolt.Tx) error {
+		cv, err := getTxComponentLatestVersion(tx, args.Comp)
+		if err != nil {
+			return err
+		}
+		cfg, err := getTxConfiguration(tx, args.Name)
+		if err != nil {
+			return err
+		}
+		if err := cfg.replaceLayer(cv); err != nil {
+			return err
+		}
+		return cfg.save(tx)
+	}
+	return multiUpdate(tr.db, fn)
 }
 
 func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) error {

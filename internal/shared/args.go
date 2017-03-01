@@ -91,6 +91,24 @@ func (a *ArgsUpdateConfiguration) Validate() error {
 	return nil
 }
 
+// ArgsBumpConfiguration describes arguments for command to update single
+// configuration layer to its most recent version
+type ArgsBumpConfiguration struct {
+	Name string `flag:"name,configuration name"`
+	Comp string `flag:"component,component name to update"`
+}
+
+// Validate checks arguments sanity
+func (a *ArgsBumpConfiguration) Validate() error {
+	if a.Name == "" || a.Comp == "" {
+		return errors.New("both name and component should be set")
+	}
+	if strings.ContainsRune(a.Name, '/') {
+		return errors.New("name cannot contain / symbol")
+	}
+	return nil
+}
+
 // ArgsShowConfiguration describes show configuration command arguments
 type ArgsShowConfiguration struct {
 	Name    string `flag:"name,configuration name"`
@@ -196,7 +214,8 @@ func (c *compVerSlice) Set(value string) error {
 const CommandsListing = `
 addver          add new component version from previously uploaded file
 addconf         add new configuration from existing component versions
-changeconf      update single layer in existing configuration
+bumpconf        update single layer of configuration to most recent uploaded version
+changeconf      update single layer of configuration to specifig version
 showconf        show configuration
 showcomp        show component versions
 components      list all known components
