@@ -2,9 +2,9 @@
 
 This repository holds set of tools to automate file deployments:
 
-* deploy-registry — server storing files and required metadata;
-* deploy-agent — agent program running on server(s) and tracking single configuration against registry;
-* deployctl — tool to manage state of configurations stored in registry and uploading files to it.
+* [deploy-registry](#deploy-registry) — server storing files and required metadata;
+* [deploy-agent](#deploy-agent) — agent program running on server(s) and tracking single configuration against registry;
+* [deployctl](#deployctl) — tool to manage state of configurations stored in registry and uploading files to it.
 
 ## Key concepts
 
@@ -26,7 +26,7 @@ Data is uploaded to registry in form of `.tar.gz` archives holding files for par
 
 	go get -u -v github.com/artyom/deploy-tools/cmd/...
 
-This command would install 3 binaries: deployctl, deploy-registry, deploy-agent
+This command would install 3 binaries: [deployctl](#deployctl), [deploy-registry](#deploy-registry), [deploy-agent](#deploy-agent)
 
 ## Registry setup
 
@@ -143,3 +143,66 @@ Script receives configuration state via the following environment variables:
 * `NEWID` — unique id of new configuration;
 * `NEWROOT` — path to directory where new configuration is unpacked;
 * `STATEFILE` — path to temporary file with json representation of new configuration.
+
+
+## Usage
+
+### deploy-registry
+
+	Usage of deploy-registry:
+	  -addr string
+		address to listen (default "localhost:2022")
+	  -deadline duration
+		max.lifetime of TCP connection (default 30m0s)
+	  -dir string
+		data directory (default "/var/lib/deploy-registry")
+	  -maxver int
+		max.number of component versions to keep (default 10)
+	  -opauth string
+		authorized_keys for operators (default "/etc/deploy-registry/operator.keys")
+	  -srvauth string
+		authorized_keys for services (default "/etc/deploy-registry/service.keys")
+
+### deployctl
+
+	Usage: deployctl [flags] subcommand [subcommand flags]
+	  -addr string
+		$DEPLOYCTL_ADDR, registry host address (host:port)
+	  -fp string
+		$DEPLOYCTL_FINGERPRINT, sha256 host key fingerprint (sha256:...)
+
+	Subcommands:
+
+	addver          add new component version from previously uploaded file
+	addconf         add new configuration from existing component versions
+	changeconf      update single layer in existing configuration
+	showconf        show configuration
+	showcomp        show component versions
+	components      list all known components
+	configurations  list all known configurations
+	delver          delete component version
+	delcomp         delete all component versions
+	delconf         delete configuration
+
+	use -h flag to get more help on a specific command
+
+### deploy-agent
+
+	Usage of deploy-agent:
+	  -addr string
+		registry address (host:port) (default "localhost:2022")
+	  -cleanold
+		try to remove previous state unpacked files after switching state
+	  -dir string
+		directory to store downloaded and unpacked files (default ".")
+	  -fp string
+		registry server key fingerprint
+	  -key string
+		ssh private key to use (default "id_ecdsa")
+	  -name string
+		configuration to track
+	  -script string
+		script to run on deploys (default "./deploy.sh")
+	  -state string
+		file to save state to (default "state.json")
+	  -v	be more chatty about what's happening
