@@ -978,7 +978,7 @@ func (tr *tracker) handleTerminalCommand(term io.Writer, args []string) error {
 	}
 	switch cmd, args := args[0], args[1:]; cmd {
 	case "help":
-		fmt.Fprintln(term, strings.TrimSpace(verboseHelp))
+		fmt.Fprintln(term, strings.TrimSpace(shared.CommandsListing))
 		return nil
 	case "addver":
 		return tr.handleAddVersion(term, args)
@@ -1321,18 +1321,3 @@ func isClosed(err error) bool {
 	}
 	return strings.Contains(err.Error(), "use of closed network connection")
 }
-
-const verboseHelp = `
-addver          add new component version from previously uploaded file
-delver          delete component version
-delcomp         delete the whole component
-addconf         add new configuration from existing component versions
-delconf         delete configuration
-changeconf      update single layer in existing configuration
-showconf        show configuration
-showcomp        show component versions
-components      show list of all known components
-configurations  show list of all known configurations
-
-type "command -h" to get more help on a specific command
-`

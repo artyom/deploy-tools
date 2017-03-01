@@ -17,6 +17,9 @@ func (a *ArgsDelVersion) Validate() error {
 	if a.Name == "" || a.Version == "" {
 		return errors.New("both name and version should be set")
 	}
+	if strings.ContainsRune(a.Name, ':') {
+		return errors.New("name cannot contain : symbol")
+	}
 	return nil
 }
 
@@ -143,6 +146,25 @@ func (a *ArgsAddVersionByHash) Validate() error {
 	return nil
 }
 
+// ArgsAddVersionByFile describes arguments to add component version command
+// when version is added by uploading file
+type ArgsAddVersionByFile struct {
+	Name    string `flag:"name,component name"`
+	Version string `flag:"version,unique version id"`
+	File    string `flag:"file,tar.gz file to upload"`
+}
+
+// Validate checks arguments sanity
+func (a *ArgsAddVersionByFile) Validate() error {
+	if a.Name == "" || a.Version == "" || a.File == "" {
+		return errors.New("name, version and file should all be set")
+	}
+	if strings.ContainsRune(a.Name, ':') {
+		return errors.New("name cannot contain : symbol")
+	}
+	return nil
+}
+
 // compVer holds single layer specification as passed by operator
 type compVer struct {
 	Comp, Ver string
@@ -168,3 +190,20 @@ func (c *compVerSlice) Set(value string) error {
 	*c = append(*c, compVer{Comp: flds[0], Ver: flds[1]})
 	return nil
 }
+
+// CommandsListing is used to print listing of all supported commands with their
+// short description
+const CommandsListing = `
+addver          add new component version from previously uploaded file
+delver          delete component version
+delcomp         delete the whole component
+addconf         add new configuration from existing component versions
+delconf         delete configuration
+changeconf      update single layer in existing configuration
+showconf        show configuration
+showcomp        show component versions
+components      show list of all known components
+configurations  show list of all known configurations
+
+use -h flag to get more help on a specific command
+`
