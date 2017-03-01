@@ -3,10 +3,13 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -96,15 +99,30 @@ func uploadAndUpdate(addr, fingerprint string, args *shared.ArgsAddVersionByFile
 		return err
 	}
 	defer dst.Close()
-	// TODO: check whether file is valid tar.gz archive by unpacking
-	// & discarding it as we upload
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	defer pr.Close()
+	verifyErr := make(chan error)
+	go func() {
+		err := decodeArchive(pr)
+		pr.CloseWithError(err)
+		verifyErr <- err
+	}()
 	h := sha256.New()
 	tr := io.TeeReader(src, h)
-	if _, err := io.Copy(dst, tr); err != nil {
+	if _, err := io.Copy(io.MultiWriter(pw, dst), tr); err != nil {
 		return errors.WithMessage(err, "upload failure")
 	}
 	if err := dst.Close(); err != nil {
 		return err
+	}
+	// decodeArchive buffers data, so it may not fail during io.Copy to
+	// MultiWriter above if data is copied faster than decoded; ensure we
+	// check decode result
+	switch err := <-verifyErr; err {
+	case io.EOF:
+	default:
+		return errors.WithMessage(err, "file validation failed")
 	}
 	session, err := client.NewSession()
 	if err != nil {
@@ -229,5 +247,24 @@ func usageFunc(printDefaults func()) func() {
 		printDefaults()
 		fmt.Fprintln(os.Stderr, "\nSubcommands:\n")
 		fmt.Fprintln(os.Stderr, strings.TrimSpace(shared.CommandsListing))
+	}
+}
+
+// decodeArchive reads and unpacks rd as tar.gz stream, discarding data and
+// returning first error it encounters
+func decodeArchive(rd io.Reader) error {
+	gr, err := gzip.NewReader(rd)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		if _, err := tr.Next(); err != nil {
+			return err
+		}
+		if _, err := io.Copy(ioutil.Discard, tr); err != nil {
+			return err
+		}
 	}
 }
