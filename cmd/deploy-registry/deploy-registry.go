@@ -369,9 +369,10 @@ func (tr *tracker) openConfig(name string) (io.ReaderAt, error) {
 }
 
 func newTracker(dir string, keepVersions int, log logger.Interface) (*tracker, error) {
-	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, &bolt.Options{Timeout: time.Second})
+	dbFile := filepath.Join(dir, "state.db")
+	db, err := bolt.Open(dbFile, 0600, &bolt.Options{Timeout: 100 * time.Millisecond})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to acquire lock/open state file %q", dbFile)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	tr := &tracker{
