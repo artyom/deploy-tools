@@ -101,27 +101,28 @@ func run(args runConf) error {
 			return err
 		}
 		go func(conn net.Conn) {
-			if args.Deadline > 5*time.Minute {
-				_ = conn.SetDeadline(time.Now().Add(args.Deadline))
-			}
+			_ = conn.SetDeadline(time.Now().Add(20 * time.Second)) // limit to do ssh negotiation
 			if c, ok := conn.(*net.TCPConn); ok {
 				c.SetKeepAlive(true)
 				c.SetKeepAlivePeriod(3 * time.Minute)
 			}
-			if err := serveConn(conn, config, tr); err != nil && errors.Cause(err) != io.EOF {
+			if err := serveConn(conn, args.Deadline, config, tr); err != nil && errors.Cause(err) != io.EOF {
 				log.Printf("%+v", err)
 			}
 		}(conn)
 	}
 }
 
-func serveConn(conn net.Conn, config *ssh.ServerConfig, tr *tracker) error {
+func serveConn(conn net.Conn, deadline time.Duration, config *ssh.ServerConfig, tr *tracker) error {
 	defer conn.Close()
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	defer sconn.Close()
+	if deadline > 0 {
+		_ = conn.SetDeadline(time.Now().Add(deadline))
+	}
 	go ssh.DiscardRequests(reqs)
 	isServiceUser := internals.IsServiceUser(sconn.Permissions)
 	for newChannel := range chans {
