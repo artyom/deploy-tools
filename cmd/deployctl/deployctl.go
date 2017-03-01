@@ -88,6 +88,8 @@ func uploadAndUpdate(addr, fingerprint string, args *shared.ArgsAddVersionByFile
 		return err
 	}
 	defer dst.Close()
+	// TODO: check whether file is valid tar.gz archive by unpacking
+	// & discarding it as we upload
 	h := sha256.New()
 	tr := io.TeeReader(src, h)
 	if _, err := io.Copy(dst, tr); err != nil {
