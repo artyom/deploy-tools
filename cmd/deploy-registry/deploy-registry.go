@@ -651,6 +651,22 @@ func fetchTxKey(tx *bolt.Tx, addr ...string) []byte {
 	return nil
 }
 
+func existsTxKey(tx *bolt.Tx, addr ...string) bool {
+	bkt := tx.Bucket([]byte(addr[0]))
+	if bkt == nil {
+		return false
+	}
+	for _, k := range addr[1:] {
+		if v := bkt.Get([]byte(k)); v != nil {
+			return true
+		}
+		if bkt = bkt.Bucket([]byte(k)); bkt == nil {
+			return false
+		}
+	}
+	return false
+}
+
 func fetchConfigs(db *bolt.DB, names ...string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(names))
 	err := db.View(func(tx *bolt.Tx) error {
@@ -697,6 +713,9 @@ func (cv *ComponentVersion) byTimeKey() string {
 }
 
 func (cv *ComponentVersion) save(tx *bolt.Tx) error {
+	if existsTxKey(tx, bktComponents, cv.Name, bktByVersion, cv.Version) {
+		return errors.Errorf("version %q already exists", cv.Version)
+	}
 	val, err := json.Marshal(cv)
 	if err != nil {
 		return err
