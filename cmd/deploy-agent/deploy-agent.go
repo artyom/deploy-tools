@@ -116,6 +116,9 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	if len(newState.Hash) != 64 {
 		return errors.Errorf("invalid state hash value: %q, expecting sha256 sum", newState.Hash)
 	}
+	if len(newState.Layers) == 0 {
+		return errors.New("invalid state: no layers")
+	}
 	if newState.Hash == state.Hash {
 		return nil
 	}
