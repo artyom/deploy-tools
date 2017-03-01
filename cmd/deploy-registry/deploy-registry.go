@@ -1032,10 +1032,7 @@ func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
 	args := struct {
 		Name string `flag:"name,component name"`
 	}{}
-	fs := flag.NewFlagSet("showcomp", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("showcomp", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" {
@@ -1061,10 +1058,7 @@ func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error 
 		Name    string `flag:"name,configuration name"`
 		Verbose bool   `flag:"v,show extra details"`
 	}{}
-	fs := flag.NewFlagSet("showconf", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("showconf", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" {
@@ -1094,10 +1088,7 @@ func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) erro
 		Comp string `flag:"component,component name to update"`
 		Ver  string `flag:"version,new version of selected component"`
 	}{}
-	fs := flag.NewFlagSet("changeconf", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("changeconf", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" || args.Comp == "" || args.Ver == "" {
@@ -1125,10 +1116,7 @@ func (tr *tracker) handleAddConfiguration(w io.Writer, rawArgs []string) error {
 		Name   string       `flag:"name,configuration name"`
 		Layers compVerSlice `flag:"layer,layer in component:version format; can be set multiple times"`
 	}{}
-	fs := flag.NewFlagSet("addconf", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("addconf", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" || len(args.Layers) == 0 {
@@ -1157,10 +1145,7 @@ func (tr *tracker) handleDelConfiguration(w io.Writer, rawArgs []string) error {
 		Name  string `flag:"name,configuration name"`
 		Force bool   `flag:"force,remove configuration for real"`
 	}{}
-	fs := flag.NewFlagSet("delconf", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("delconf", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" {
@@ -1178,10 +1163,7 @@ func (tr *tracker) handleDelComponent(w io.Writer, rawArgs []string) error {
 	args := struct {
 		Name string `flag:"name,component name"`
 	}{}
-	fs := flag.NewFlagSet("delcomp", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("delcomp", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" {
@@ -1197,10 +1179,7 @@ func (tr *tracker) handleDelVersion(w io.Writer, rawArgs []string) error {
 		Name    string `flag:"name,component name"`
 		Version string `flag:"version,unique version id"`
 	}{}
-	fs := flag.NewFlagSet("delver", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("delver", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" || args.Version == "" {
@@ -1217,10 +1196,7 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 		Version string `flag:"version,unique version id"`
 		Hash    string `flag:"hash,sha256 content hash in hex representation (64 chars)"`
 	}{}
-	fs := flag.NewFlagSet("addver", flag.ContinueOnError)
-	fs.SetOutput(w)
-	autoflags.DefineFlagSet(fs, &args)
-	if fs.Parse(rawArgs) != nil {
+	if parseArgs("addver", &args, w, rawArgs) != nil {
 		return errNonZeroResult
 	}
 	if args.Name == "" || args.Version == "" || args.Hash == "" {
@@ -1256,6 +1232,16 @@ func (tr *tracker) handleAddVersion(w io.Writer, rawArgs []string) error {
 	delete(tr.uploads, args.Hash)
 	tr.mu.Unlock()
 	return nil
+}
+
+// parseArgs defines new flag set with flags from argStruct that writes its
+// errors to w, then calls flag set Parse method on provided raw arguments
+// returning error.
+func parseArgs(fname string, argStruct interface{}, w io.Writer, raw []string) error {
+	fs := flag.NewFlagSet(fname, flag.ContinueOnError)
+	fs.SetOutput(w)
+	autoflags.DefineFlagSet(fs, argStruct)
+	return fs.Parse(raw)
 }
 
 type exitStatusMsg struct {
