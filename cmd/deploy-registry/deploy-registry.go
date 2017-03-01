@@ -43,8 +43,7 @@ func main() {
 		KeepVersions: 10,
 		Deadline:     30 * time.Minute,
 	}
-	autoflags.Define(&args)
-	flag.Parse()
+	autoflags.Parse(&args)
 	if err := run(args); err != nil {
 		log.Fatal(err)
 	}

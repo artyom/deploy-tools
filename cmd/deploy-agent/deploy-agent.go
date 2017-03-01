@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -39,8 +38,7 @@ func main() {
 		Dir:    ".",
 		Script: "./deploy.sh",
 	}
-	autoflags.Define(args)
-	flag.Parse()
+	autoflags.Parse(args)
 	log := log.New(os.Stderr, "", log.LstdFlags)
 	if err := run(args, log); err != nil {
 		log.Fatal(err)
