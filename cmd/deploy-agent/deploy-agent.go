@@ -67,6 +67,11 @@ func run(args *mainArgs, log logger.Interface) error {
 	if args.State == "" {
 		return errors.New("no state file set")
 	}
+	unlockDir, err := lockDir(args.Dir)
+	if err != nil {
+		return err
+	}
+	defer unlockDir()
 	cfg, err := newClientConfig(args.Key, args.Fp)
 	if err != nil {
 		return err
@@ -443,4 +448,21 @@ func pollRandomizer(base time.Duration, n int) func() <-chan time.Time {
 	return func() <-chan time.Time {
 		return time.After(base + time.Duration(r.Intn(n))*time.Second)
 	}
+}
+
+// lockDir creates directory dir if necessary and tries to acquire exclusive
+// lock on it. Returned unlockFn unlocks directory.
+func lockDir(dir string) (unlockFn func(), err error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, errors.Wrapf(err, "cannot acquire exclusive lock on %q", dir)
+	}
+	return func() { f.Close() }, nil
 }
