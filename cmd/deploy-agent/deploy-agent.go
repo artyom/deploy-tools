@@ -94,6 +94,9 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	default:
 		return err
 	}
+	if err := cleanCache(filepath.Join(args.Dir, cacheDir), state.Layers, time.Hour); err != nil {
+		log.Println("error cleaning cache directory:", err)
+	}
 	client, err := ssh.Dial("tcp", args.Addr, cfg)
 	if err != nil {
 		return err
@@ -138,9 +141,6 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	}
 	if args.Verbose {
 		log.Println("switched to new configuration:", newState.Hash)
-	}
-	if err := cleanCache(filepath.Join(args.Dir, cacheDir), newState.Layers, time.Hour); err != nil {
-		log.Println("error cleaning cache directory:", err)
 	}
 	if args.CleanOld && state.Hash != "" {
 		oldDir := filepath.Join(args.Dir, unpackedDir, filepath.Base(state.Hash))
