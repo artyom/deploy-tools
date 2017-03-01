@@ -173,19 +173,23 @@ type validator interface {
 }
 
 func validatorForCommand(name string) (validator, error) {
-	v, ok := map[string]validator{
-		"delver":     &shared.ArgsDelVersion{},
-		"delcomp":    &shared.ArgsDelComponent{},
-		"addconf":    &shared.ArgsAddConfiguration{},
-		"delconf":    &shared.ArgsDelConfiguration{},
-		"changeconf": &shared.ArgsUpdateConfiguration{},
-		"showconf":   &shared.ArgsShowConfiguration{},
-		"showcomp":   &shared.ArgsShowComponent{},
-	}[name]
-	if !ok {
-		return nil, errors.Errorf("unknown command: %q", name)
+	switch name {
+	case "delver":
+		return &shared.ArgsDelVersion{}, nil
+	case "delcomp":
+		return &shared.ArgsDelComponent{}, nil
+	case "addconf":
+		return &shared.ArgsAddConfiguration{}, nil
+	case "delconf":
+		return &shared.ArgsDelConfiguration{}, nil
+	case "changeconf":
+		return &shared.ArgsUpdateConfiguration{}, nil
+	case "showconf":
+		return &shared.ArgsShowConfiguration{}, nil
+	case "showcomp":
+		return &shared.ArgsShowComponent{}, nil
 	}
-	return v, nil
+	return nil, errors.Errorf("unknown command: %q", name)
 }
 
 // errFlagParseError is a sentinel error value used to determine whether error
