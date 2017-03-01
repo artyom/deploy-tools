@@ -38,9 +38,9 @@ import (
 func main() {
 	args := runConf{
 		Addr:         "localhost:2022",
-		Dir:          ".",
-		OpAuth:       "operator.keys",
-		SrvAuth:      "service.keys",
+		Dir:          "/var/lib/deploy-registry",
+		OpAuth:       "/etc/deploy-registry/operator.keys",
+		SrvAuth:      "/etc/deploy-registry/service.keys",
 		KeepVersions: 10,
 		Deadline:     30 * time.Minute,
 	}
