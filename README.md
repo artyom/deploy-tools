@@ -192,7 +192,7 @@ Script receives configuration state via the following environment variables:
 	  -addr string
 		registry address (host:port) (default "localhost:2022")
 	  -cleanold
-		try to remove previous state unpacked files after switching state
+		remove unreferenced unpacked files after successful switch
 	  -dir string
 		directory to store downloaded and unpacked files (default ".")
 	  -fp string

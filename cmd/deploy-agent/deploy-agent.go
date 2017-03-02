@@ -55,7 +55,7 @@ type mainArgs struct {
 	Fp       string        `flag:"fp,registry server key fingerprint"`
 	Dir      string        `flag:"dir,directory to store downloaded and unpacked files"`
 	Script   string        `flag:"script,script to run on deploys"`
-	CleanOld bool          `flag:"cleanold,try to remove previous state unpacked files after switching state"`
+	CleanOld bool          `flag:"cleanold,remove unreferenced unpacked files after successful switch"`
 	Verbose  bool          `flag:"v,be more chatty about what's happening"`
 	Poll     time.Duration `flag:"poll,registry poll interval"`
 }
@@ -152,12 +152,43 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	if args.Verbose {
 		log.Println("switched to new configuration:", newState.Hash)
 	}
-	if args.CleanOld && state.Hash != "" {
-		oldDir := filepath.Join(args.Dir, unpackedDir, filepath.Base(state.Hash))
-		if err := os.RemoveAll(oldDir); err != nil {
-			log.Println("failed to remove old state directory:", err)
+	if args.CleanOld {
+		if err := cleanUnpacked(filepath.Join(args.Dir, unpackedDir), newState.Hash); err != nil {
+			log.Println("error cleaning old unpacked files:", err)
 		}
-		_ = os.Remove(oldDir + ".ok")
+	}
+	return nil
+}
+
+func cleanUnpacked(dir, hashKeep string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fis, err := f.Readdir(0)
+	if err != nil {
+		return err
+	}
+	for _, fi := range fis {
+		switch name := fi.Name(); {
+		default:
+			continue
+		case name == hashKeep || name == hashKeep+".ok":
+			continue
+		case len(name) == 64 && fi.IsDir():
+		case len(name) == 64+3 && strings.HasSuffix(name, ".ok"):
+		}
+		// remove .ok flag BEFORE removing directory, so even if
+		// directory removal fails mid-way, there's no .ok flag left
+		if len(fi.Name()) == 64 && fi.IsDir() {
+			if err := os.RemoveAll(filepath.Join(dir, fi.Name()+".ok")); err != nil {
+				return err
+			}
+		}
+		if err := os.RemoveAll(filepath.Join(dir, fi.Name())); err != nil {
+			return err
+		}
 	}
 	return nil
 }
