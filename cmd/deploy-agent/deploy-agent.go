@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,7 +119,7 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	if err != nil {
 		return err
 	}
-	if len(newState.Hash) != 64 {
+	if validateHash(newState.Hash) != nil {
 		return errors.Errorf("invalid state hash value: %q, expecting sha256 sum", newState.Hash)
 	}
 	if len(newState.Layers) == 0 {
@@ -496,4 +497,16 @@ func lockDir(dir string) (unlockFn func(), err error) {
 		return nil, errors.Wrapf(err, "cannot acquire exclusive lock on %q", dir)
 	}
 	return func() { f.Close() }, nil
+}
+
+// validateHash checks whether s is a valid hex representation of sha256 hash
+func validateHash(s string) error {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	if l := len(b); l != sha256.Size {
+		return errors.Errorf("length mismatch: %d", l)
+	}
+	return nil
 }
