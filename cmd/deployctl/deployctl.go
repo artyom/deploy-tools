@@ -109,8 +109,7 @@ func uploadAndUpdate(addr, fingerprint string, args *shared.ArgsAddVersionByFile
 		verifyErr <- err
 	}()
 	h := sha256.New()
-	tr := io.TeeReader(src, h)
-	if _, err := io.Copy(io.MultiWriter(pw, dst), tr); err != nil {
+	if _, err := io.Copy(io.MultiWriter(pw, dst, h), src); err != nil {
 		return errors.WithMessage(err, "upload failure")
 	}
 	if err := dst.Close(); err != nil {
