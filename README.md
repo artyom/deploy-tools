@@ -175,7 +175,8 @@ Script receives configuration state via the following environment variables:
 
 	addver          add new component version from previously uploaded file
 	addconf         add new configuration from existing component versions
-	changeconf      update single layer in existing configuration
+	bumpconf        update single layer of configuration to most recent uploaded version
+	changeconf      update single layer of configuration to specific version
 	showconf        show configuration
 	showcomp        show component versions
 	components      list all known components
