@@ -20,6 +20,8 @@ import (
 
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/internal/shared"
+	"github.com/artyom/isterm"
+	"github.com/artyom/progress"
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
 )
@@ -93,6 +95,10 @@ func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVers
 		return err
 	}
 	defer src.Close()
+	var srcSize int64
+	if fi, err := src.Stat(); err == nil {
+		srcSize = fi.Size()
+	}
 	client, cancel, err := dialSSH(addr, keyFile, fingerprint)
 	if err != nil {
 		return err
@@ -118,8 +124,16 @@ func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVers
 		verifyErr <- err
 	}()
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(pw, dst, h), src); err != nil {
+	writers := []io.Writer{pw, dst, h}
+	withProgress := isterm.IsTerminal()
+	if withProgress {
+		writers = append(writers, progress.New(srcSize))
+	}
+	if _, err := io.Copy(io.MultiWriter(writers...), src); err != nil {
 		return errors.WithMessage(err, "upload failure")
+	}
+	if withProgress {
+		fmt.Println() // newline to leave progress above
 	}
 	pw.Close()
 	if err := dst.Close(); err != nil {
