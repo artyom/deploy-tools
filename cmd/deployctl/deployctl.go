@@ -24,10 +24,19 @@ import (
 	"github.com/pkg/sftp"
 )
 
+// defaults can be pre-defined on build time using -ldflags="-X=..."
+var defaultAddress, defaultFingerprint string
+
 func main() {
 	args := &runArgs{
-		Addr: os.Getenv("DEPLOYCTL_ADDR"),
-		Fp:   os.Getenv("DEPLOYCTL_FINGERPRINT"),
+		Addr: defaultAddress,
+		Fp:   defaultFingerprint,
+	}
+	if val, ok := os.LookupEnv("DEPLOYCTL_ADDR"); ok {
+		args.Addr = val
+	}
+	if val, ok := os.LookupEnv("DEPLOYCTL_FINGERPRINT"); ok {
+		args.Fp = val
 	}
 	fs := flag.NewFlagSet("deployctl", flag.ExitOnError)
 	fs.Usage = usageFunc(fs.PrintDefaults)
