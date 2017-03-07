@@ -121,6 +121,7 @@ func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVers
 	if _, err := io.Copy(io.MultiWriter(pw, dst, h), src); err != nil {
 		return errors.WithMessage(err, "upload failure")
 	}
+	pw.Close()
 	if err := dst.Close(); err != nil {
 		return err
 	}
