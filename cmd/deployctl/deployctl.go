@@ -42,7 +42,7 @@ func main() {
 		fs.Usage()
 		os.Exit(2)
 	}
-	if err := dispatch(args.Addr, args.Fp, fs.Args()); err != nil {
+	if err := dispatch(args.Addr, args.Key, args.Fp, fs.Args()); err != nil {
 		if err == errFlagParseError {
 			os.Exit(2)
 		}
@@ -53,20 +53,20 @@ func main() {
 	}
 }
 
-func dispatch(addr, fingerprint string, rawArgs []string) error {
+func dispatch(addr, keyFile, fingerprint string, rawArgs []string) error {
 	if len(rawArgs) == 0 {
 		return errors.New("nothing to do")
 	}
 	cmd, args := rawArgs[0], rawArgs[1:]
 	switch cmd {
 	case "components", "configurations":
-		return proxyCommand(addr, fingerprint, rawArgs)
+		return proxyCommand(addr, keyFile, fingerprint, rawArgs)
 	case "addver":
 		val := &shared.ArgsAddVersionByFile{}
 		if err := parseArgs(cmd, val, os.Stderr, args); err != nil {
 			return err
 		}
-		return uploadAndUpdate(addr, fingerprint, val)
+		return uploadAndUpdate(addr, keyFile, fingerprint, val)
 	}
 	val, err := validatorForCommand(cmd)
 	if err != nil {
@@ -75,16 +75,16 @@ func dispatch(addr, fingerprint string, rawArgs []string) error {
 	if err := parseArgs(cmd, val, os.Stderr, args); err != nil {
 		return err
 	}
-	return proxyCommand(addr, fingerprint, rawArgs)
+	return proxyCommand(addr, keyFile, fingerprint, rawArgs)
 }
 
-func uploadAndUpdate(addr, fingerprint string, args *shared.ArgsAddVersionByFile) error {
+func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVersionByFile) error {
 	src, err := os.Open(args.File)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	client, cancel, err := dialSSH(addr, fingerprint)
+	client, cancel, err := dialSSH(addr, keyFile, fingerprint)
 	if err != nil {
 		return err
 	}
@@ -134,21 +134,26 @@ func uploadAndUpdate(addr, fingerprint string, args *shared.ArgsAddVersionByFile
 		args.Name, args.Version, h.Sum(nil)))
 }
 
-func dialSSH(addr, fingerprint string) (client *ssh.Client, closeFunc func(), err error) {
-	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
-	if err != nil {
-		return nil, nil, errors.WithMessage(err, "cannot connect to ssh-agent, check if SSH_AUTH_SOCK is set")
-	}
-	defer func() {
-		if err != nil {
-			agentConn.Close()
-		}
-	}()
-	sshAgent := agent.NewClient(agentConn)
+func dialSSH(addr, keyFile, fingerprint string) (client *ssh.Client, closeFunc func(), err error) {
 	var signers []ssh.Signer
-	signers, err = sshAgent.Signers()
-	if err != nil {
-		return nil, nil, err
+	switch {
+	case keyFile != "":
+		s, err := readKey(keyFile)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "failed to read/parse key file %q", keyFile)
+		}
+		signers = append(signers, s)
+	default:
+		agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+		if err != nil {
+			return nil, nil, errors.WithMessage(err, "cannot connect to ssh-agent, check if SSH_AUTH_SOCK is set")
+		}
+		defer agentConn.Close()
+		sshAgent := agent.NewClient(agentConn)
+		signers, err = sshAgent.Signers()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	config := &ssh.ClientConfig{
 		User:    os.Getenv("USER"),
@@ -165,12 +170,12 @@ func dialSSH(addr, fingerprint string) (client *ssh.Client, closeFunc func(), er
 	if err != nil {
 		return nil, nil, err
 	}
-	closeFunc = func() { client.Close(); agentConn.Close() }
+	closeFunc = func() { client.Close() }
 	return client, closeFunc, nil
 }
 
-func proxyCommand(addr, fingerprint string, args []string) error {
-	client, cancel, err := dialSSH(addr, fingerprint)
+func proxyCommand(addr, keyFile, fingerprint string, args []string) error {
+	client, cancel, err := dialSSH(addr, keyFile, fingerprint)
 	if err != nil {
 		return err
 	}
@@ -233,6 +238,7 @@ func parseArgs(command string, argStruct validator, w io.Writer, raw []string) e
 type runArgs struct {
 	Addr string `flag:"addr,$DEPLOYCTL_ADDR, registry host address (host:port)"`
 	Fp   string `flag:"fp,$DEPLOYCTL_FINGERPRINT, sha256 host key fingerprint (sha256:...)"`
+	Key  string `flag:"key,ssh private key to use; if not set, ssh-agent is used"`
 }
 
 func (a *runArgs) Validate() error {
@@ -269,4 +275,12 @@ func decodeArchive(rd io.Reader) error {
 			return err
 		}
 	}
+}
+
+func readKey(name string) (ssh.Signer, error) {
+	privateBytes, err := ioutil.ReadFile(name)
+	if err != nil {
+		return nil, err
+	}
+	return ssh.ParsePrivateKey(privateBytes)
 }

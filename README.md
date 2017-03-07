@@ -170,6 +170,8 @@ Script receives configuration state via the following environment variables:
 		$DEPLOYCTL_ADDR, registry host address (host:port)
 	  -fp string
 		$DEPLOYCTL_FINGERPRINT, sha256 host key fingerprint (sha256:...)
+	  -key string
+		ssh private key to use; if not set, ssh-agent is used
 
 	Subcommands:
 
