@@ -327,7 +327,7 @@ func untarTo(name, dir string) error {
 }
 
 func downloadMissing(ctx context.Context, sconn *sftp.Client, dir string, layers []layer) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	for _, l := range layers {
