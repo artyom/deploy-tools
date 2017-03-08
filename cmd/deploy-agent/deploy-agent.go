@@ -292,7 +292,7 @@ func unpackLayers(ctx context.Context, dst, filesDir string, layers []layer) err
 			return nil
 		}
 	}
-	if err := os.MkdirAll(dst, 0750); err != nil {
+	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
 	for _, l := range layers {
