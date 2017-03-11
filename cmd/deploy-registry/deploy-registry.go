@@ -1300,14 +1300,22 @@ type readerAtCloser interface {
 // openFile implements io.ReaderAt, io.Closer
 type openFile struct {
 	f             *os.File
+	wg            sync.WaitGroup // tracks in-flight ReadAt ops
 	once          sync.Once
 	closeCallback func()
 }
 
-func (of *openFile) ReadAt(p []byte, off int64) (int, error) { return of.f.ReadAt(p, off) }
+func (of *openFile) ReadAt(p []byte, off int64) (int, error) {
+	of.wg.Add(1)
+	defer of.wg.Done()
+	return of.f.ReadAt(p, off)
+}
 func (of *openFile) Close() error {
 	of.once.Do(of.closeCallback)
-	return of.f.Close()
+	// wait asynchronously so slow ReadAt call serving other client won't
+	// block Close call done in context of this client
+	go func() { of.wg.Wait(); of.f.Close() }()
+	return nil
 }
 
 // ptyRequestDimensions parses "pty-req" request payload as specified in
