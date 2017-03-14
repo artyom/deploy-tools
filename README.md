@@ -30,7 +30,7 @@ This command would install 3 binaries: [deployctl](#deployctl), [deploy-registry
 
 ## Registry setup
 
-deploy-registry requires single repository to keep its files and state in (`-dir` flag), and two files of ssh `authorized_keys` format: one with operators' keys (`-opauth` flag), one with keys for servers/consumers (`-srvauth` flag). deploy-registry won't start unless each of these files have at least one key.
+deploy-registry requires single directory to keep its files and state in (`-dir` flag), and two files of ssh `authorized_keys` format: one with operators' keys (`-opauth` flag), one with keys for servers/consumers (`-srvauth` flag). deploy-registry won't start unless each of these files have at least one key.
 
 If directory (`-dir` flag) already contains `host_key` file, deploy-registry will try to parse it as pem-encoded ssh private key and use it as host key for built-in ssh server. If file is not found, new key would be generated and saved to this file. Key fingerprint is logged on deploy-registry start.
 
