@@ -1089,7 +1089,7 @@ func (tr *tracker) handleShowComponent(w io.Writer, rawArgs []string) error {
 	if err != nil {
 		return err
 	}
-	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
+	tw := tabwriter.NewWriter(w, 0, 8, 3, ' ', 0)
 	for _, name := range keys {
 		fmt.Fprintln(tw, strings.Replace(name, "#", "\t", 1))
 	}
@@ -1114,7 +1114,7 @@ func (tr *tracker) handleShowConfiguration(w io.Writer, rawArgs []string) error 
 		fmt.Fprintf(w, "Hash:\t%s\n", cfg.Hash)
 		fmt.Fprintln(w)
 	}
-	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
+	tw := tabwriter.NewWriter(w, 0, 8, 3, ' ', 0)
 	for _, l := range cfg.Layers {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", l.Name, l.Version,
 			l.Ctime.Format(time.RFC3339))
