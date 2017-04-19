@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/artyom/autoflags"
 	"github.com/artyom/deploy-tools/internal/shared"
@@ -68,16 +69,32 @@ func dispatch(addr, keyFile, fingerprint string, rawArgs []string) error {
 	if len(rawArgs) == 0 {
 		return errors.New("nothing to do")
 	}
+	var hostKeyCallback ssh.HostKeyCallback
+	var err error
+	switch fingerprint {
+	case "":
+		hostKeyCallback, err = knownhosts.New(os.ExpandEnv("${HOME}/.ssh/known_hosts"))
+		if err != nil {
+			return err
+		}
+	default:
+		hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			if hostFp := ssh.FingerprintSHA256(key); hostFp != fingerprint {
+				return errors.Errorf("host key fingerprint mismatch: %v", hostFp)
+			}
+			return nil
+		}
+	}
 	cmd, args := rawArgs[0], rawArgs[1:]
 	switch cmd {
 	case "components", "configurations":
-		return proxyCommand(addr, keyFile, fingerprint, rawArgs)
+		return proxyCommand(addr, keyFile, hostKeyCallback, rawArgs)
 	case "addver":
 		val := &shared.ArgsAddVersionByFile{}
 		if err := parseArgs(cmd, val, os.Stderr, args); err != nil {
 			return err
 		}
-		return uploadAndUpdate(addr, keyFile, fingerprint, val)
+		return uploadAndUpdate(addr, keyFile, hostKeyCallback, val)
 	}
 	val, err := validatorForCommand(cmd)
 	if err != nil {
@@ -86,10 +103,10 @@ func dispatch(addr, keyFile, fingerprint string, rawArgs []string) error {
 	if err := parseArgs(cmd, val, os.Stderr, args); err != nil {
 		return err
 	}
-	return proxyCommand(addr, keyFile, fingerprint, rawArgs)
+	return proxyCommand(addr, keyFile, hostKeyCallback, rawArgs)
 }
 
-func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVersionByFile) error {
+func uploadAndUpdate(addr, keyFile string, hostKeyCallback ssh.HostKeyCallback, args *shared.ArgsAddVersionByFile) error {
 	src, err := os.Open(args.File)
 	if err != nil {
 		return err
@@ -99,7 +116,7 @@ func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVers
 	if fi, err := src.Stat(); err == nil {
 		srcSize = fi.Size()
 	}
-	client, cancel, err := dialSSH(addr, keyFile, fingerprint)
+	client, cancel, err := dialSSH(addr, keyFile, hostKeyCallback)
 	if err != nil {
 		return err
 	}
@@ -158,7 +175,7 @@ func uploadAndUpdate(addr, keyFile, fingerprint string, args *shared.ArgsAddVers
 		args.Name, args.Version, h.Sum(nil)))
 }
 
-func dialSSH(addr, keyFile, fingerprint string) (client *ssh.Client, closeFunc func(), err error) {
+func dialSSH(addr, keyFile string, hostKeyCallback ssh.HostKeyCallback) (client *ssh.Client, closeFunc func(), err error) {
 	var signers []ssh.Signer
 	switch {
 	case keyFile != "":
@@ -180,15 +197,10 @@ func dialSSH(addr, keyFile, fingerprint string) (client *ssh.Client, closeFunc f
 		}
 	}
 	config := &ssh.ClientConfig{
-		User:    os.Getenv("USER"),
-		Auth:    []ssh.AuthMethod{ssh.PublicKeys(signers...)},
-		Timeout: 30 * time.Second,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			if hostFp := ssh.FingerprintSHA256(key); hostFp != fingerprint {
-				return errors.Errorf("host key fingerprint mismatch: %v", hostFp)
-			}
-			return nil
-		},
+		User:            os.Getenv("USER"),
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signers...)},
+		Timeout:         30 * time.Second,
+		HostKeyCallback: hostKeyCallback,
 	}
 	client, err = ssh.Dial("tcp", addr, config)
 	if err != nil {
@@ -198,8 +210,8 @@ func dialSSH(addr, keyFile, fingerprint string) (client *ssh.Client, closeFunc f
 	return client, closeFunc, nil
 }
 
-func proxyCommand(addr, keyFile, fingerprint string, args []string) error {
-	client, cancel, err := dialSSH(addr, keyFile, fingerprint)
+func proxyCommand(addr, keyFile string, hostKeyCallback ssh.HostKeyCallback, args []string) error {
+	client, cancel, err := dialSSH(addr, keyFile, hostKeyCallback)
 	if err != nil {
 		return err
 	}
@@ -266,8 +278,8 @@ type runArgs struct {
 }
 
 func (a *runArgs) Validate() error {
-	if a.Addr == "" || a.Fp == "" {
-		return errors.New("both addr and fp should be set")
+	if a.Addr == "" {
+		return errors.New("addr should be set")
 	}
 	return nil
 }
