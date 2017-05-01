@@ -225,6 +225,7 @@ func handleOperatorSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *
 type tracker struct {
 	db  *bolt.DB
 	dir string // root directory which holds "files" and "uploads" subdirectories
+	log logger.Interface
 
 	mu sync.Mutex
 	// uploads holds mapping of uploaded file hash to its full (temporary)
@@ -378,6 +379,7 @@ func newTracker(dir string, keepVersions int, log logger.Interface) (*tracker, e
 	tr := &tracker{
 		db:      db,
 		dir:     dir,
+		log:     log,
 		uploads: make(map[string]string),
 		files:   make(map[string]readerAtCloser),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
@@ -978,7 +980,14 @@ func handleExec(tr *tracker, rw io.ReadWriter, cmd string) error {
 	if err != nil {
 		return err
 	}
-	return tr.handleTerminalCommand(rw, args)
+	err = tr.handleTerminalCommand(rw, args)
+	switch err {
+	case nil:
+		tr.log.Printf("command ok: %v", args)
+	default:
+		tr.log.Printf("command fail: %v", args)
+	}
+	return err
 }
 
 // errNonZeroResult is returned by command handle functions when they need to
@@ -1008,8 +1017,15 @@ func serveTerminal(tr *tracker, width, height int, rw io.ReadWriter) error {
 			fmt.Fprintln(term, err)
 			continue
 		}
-		if err := tr.handleTerminalCommand(term, args); err != nil && err != errNonZeroResult {
+		err = tr.handleTerminalCommand(term, args)
+		if err != nil && err != errNonZeroResult {
 			fmt.Fprintln(term, err)
+		}
+		switch err {
+		case nil:
+			tr.log.Printf("command ok: %v", args)
+		default:
+			tr.log.Printf("command fail: %v", args)
 		}
 	}
 }
