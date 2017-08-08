@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1338,17 +1337,15 @@ func (of *openFile) Close() error {
 // RFC4254, section 6.2 and returns width and height. In case of errors zero
 // values are returned.
 func ptyRequestDimensions(b []byte) (width, height int) {
-	if len(b) < 4 {
+	p := struct {
+		Term          string
+		Width, Height uint32
+		Data          []byte `ssh:"rest"`
+	}{}
+	if err := ssh.Unmarshal(b, &p); err != nil {
 		return 0, 0
 	}
-	termLen := int(b[3]) // TERM variable size
-	if len(b) <= 3+1+termLen+4*2 {
-		return 0, 0
-	}
-	b = b[3+1+termLen:]
-	w := binary.BigEndian.Uint32(b)
-	h := binary.BigEndian.Uint32(b[4:])
-	return int(w), int(h)
+	return int(p.Width), int(p.Height)
 }
 
 // fileReference describes single component version which references file
