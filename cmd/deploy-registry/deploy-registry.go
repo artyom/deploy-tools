@@ -231,7 +231,7 @@ type tracker struct {
 	// name
 	uploads map[string]string
 	// files holds references to open files from filesDir
-	files map[string]readerAtCloser
+	files map[string]*openFile
 
 	st     *syscall.Stat_t // used to attach to virtual files
 	cancel func()
@@ -327,6 +327,7 @@ func (tr *tracker) openFile(base string) (readerAtCloser, error) {
 	defer tr.mu.Unlock()
 	r, ok := tr.files[base]
 	if ok {
+		r.wg.Add(1)
 		return r, nil
 	}
 	f, err := os.Open(filepath.Join(tr.dir, filesDir, base))
@@ -338,6 +339,7 @@ func (tr *tracker) openFile(base string) (readerAtCloser, error) {
 		defer tr.mu.Unlock()
 		delete(tr.files, base)
 	}}
+	r.wg.Add(1)
 	tr.files[base] = r
 	return f, nil
 }
@@ -380,7 +382,7 @@ func newTracker(dir string, keepVersions int, log logger.Interface) (*tracker, e
 		dir:     dir,
 		log:     log,
 		uploads: make(map[string]string),
-		files:   make(map[string]readerAtCloser),
+		files:   make(map[string]*openFile),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 		cancel:  cancel,
 	}
@@ -1315,21 +1317,23 @@ type readerAtCloser interface {
 // openFile implements io.ReaderAt, io.Closer
 type openFile struct {
 	f             *os.File
-	wg            sync.WaitGroup // tracks in-flight ReadAt ops
-	once          sync.Once
+	wg            sync.WaitGroup // tracks active uses of openFile
+	once          sync.Once      // guards call of closeCallback
 	closeCallback func()
 }
 
 func (of *openFile) ReadAt(p []byte, off int64) (int, error) {
-	of.wg.Add(1)
-	defer of.wg.Done()
 	return of.f.ReadAt(p, off)
 }
 func (of *openFile) Close() error {
-	of.once.Do(of.closeCallback)
-	// wait asynchronously so slow ReadAt call serving other client won't
+	of.wg.Done()
+	// wait asynchronously so slow ReadAt call serving another client won't
 	// block Close call done in context of this client
-	go func() { of.wg.Wait(); of.f.Close() }()
+	go func() {
+		of.wg.Wait()
+		of.once.Do(of.closeCallback)
+		of.f.Close()
+	}()
 	return nil
 }
 
