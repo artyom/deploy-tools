@@ -209,7 +209,7 @@ func cleanCache(dir string, layers []layer, age time.Duration) error {
 		if strings.HasPrefix(filepath.Base(path), tempDlPrefix) {
 			return errors.WithStack(os.Remove(path))
 		}
-		if time.Now().Sub(info.ModTime()) < age {
+		if time.Since(info.ModTime()) < age {
 			return nil
 		}
 		return errors.WithStack(os.Remove(path))

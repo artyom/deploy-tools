@@ -123,7 +123,7 @@ func (fh *fileHasher) Close() error {
 }
 
 func fileHash(f io.ReadSeeker) ([]byte, error) {
-	if _, err := f.Seek(0, os.SEEK_SET); err != nil {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, errors.WithStack(err)
 	}
 	h := sha256.New()

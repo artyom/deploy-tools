@@ -442,7 +442,7 @@ func (tr *tracker) cleanUploads(ctx context.Context, maxAge time.Duration) {
 		if !info.Mode().IsRegular() || !strings.HasPrefix(filepath.Base(path), internals.UploadPrefix) {
 			return nil
 		}
-		if time.Now().Sub(info.ModTime()) < maxAge {
+		if time.Since(info.ModTime()) < maxAge {
 			return nil
 		}
 		tr.mu.Lock()
@@ -576,18 +576,6 @@ func (tr *tracker) Close() error {
 		tr.cancel()
 	}
 	return tr.db.Close()
-}
-
-// saveKey saves provided value in a boltDB at given address. Address should
-// have at least 2 elements, as boltDB does not allow root bucket values. Last
-// element of address specifies leaf key. Buckets are created as necessary.
-func saveKey(db *bolt.DB, value []byte, addr ...string) error {
-	if db == nil || len(value) == 0 || len(addr) < 2 {
-		return errors.New("invalid saveKey arguments")
-	}
-	return db.Update(func(tx *bolt.Tx) error {
-		return saveTxKey(tx, value, addr...)
-	})
 }
 
 func multiUpdate(db *bolt.DB, funcs ...func(*bolt.Tx) error) error {
