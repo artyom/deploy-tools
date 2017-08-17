@@ -231,7 +231,7 @@ type tracker struct {
 	// name
 	uploads map[string]string
 	// files holds references to open files from filesDir
-	files map[string]readerAtCloser
+	files map[string]*fileRef
 
 	st     *syscall.Stat_t // used to attach to virtual files
 	cancel func()
@@ -322,24 +322,35 @@ func (tr *tracker) listDirs(reqPath string) ([]os.FileInfo, error) {
 	return []os.FileInfo{statConfigs, statFiles}, nil
 }
 
-func (tr *tracker) openFile(base string) (readerAtCloser, error) {
+func (tr *tracker) openFile(base string) (io.ReaderAt, error) {
+	return &openFile{c: tr, key: base}, nil
+}
+
+func (tr *tracker) getReaderAt(base string) (io.ReaderAt, error) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	r, ok := tr.files[base]
 	if ok {
+		r.cnt++
 		return r, nil
 	}
 	f, err := os.Open(filepath.Join(tr.dir, filesDir, base))
 	if err != nil {
 		return nil, err
 	}
-	r = &openFile{f: f, closeCallback: func() {
-		tr.mu.Lock()
-		defer tr.mu.Unlock()
-		delete(tr.files, base)
-	}}
+	r = &fileRef{File: f, cnt: 1}
 	tr.files[base] = r
 	return f, nil
+}
+
+func (tr *tracker) releaseReaderAt(base string) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	r, ok := tr.files[base]
+	if !ok {
+		return
+	}
+	r.cnt--
 }
 
 func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
@@ -380,14 +391,39 @@ func newTracker(dir string, keepVersions int, log logger.Interface) (*tracker, e
 		dir:     dir,
 		log:     log,
 		uploads: make(map[string]string),
-		files:   make(map[string]readerAtCloser),
+		files:   make(map[string]*fileRef),
 		st:      &syscall.Stat_t{Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())},
 		cancel:  cancel,
 	}
 	go tr.cleanUploads(ctx, 30*time.Minute)
+	go tr.cleanOpenFileCache(ctx)
 	go cleanVersions(ctx, tr.db, keepVersions, time.Hour, log)
 	go cleanUnreferencedFiles(ctx, tr.db, filepath.Join(dir, filesDir), 3*time.Hour, log)
 	return tr, nil
+}
+
+func (tr *tracker) cleanOpenFileCache(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	fn := func() {
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		for k, f := range tr.files {
+			if f.cnt > 0 {
+				continue
+			}
+			delete(tr.files, k)
+			f.Close()
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fn()
+		}
+	}
 }
 
 // cleanUploads periodically checks uploads directory and removes orphaned files
@@ -1307,30 +1343,30 @@ func isSftpRequest(req *ssh.Request) bool {
 	return req.Type == "subsystem" && len(req.Payload) > 4 && string(req.Payload[4:]) == "sftp"
 }
 
-type readerAtCloser interface {
-	io.ReaderAt
-	io.Closer
+// fileCache is implemented by the tracker type. fileCache keeps references to
+// open *os.File and closes them when usage count drops to zero
+type fileCache interface {
+	getReaderAt(string) (io.ReaderAt, error)
+	releaseReaderAt(string)
 }
 
-// openFile implements io.ReaderAt, io.Closer
 type openFile struct {
-	f             *os.File
-	wg            sync.WaitGroup // tracks in-flight ReadAt ops
-	once          sync.Once
-	closeCallback func()
+	c   fileCache
+	key string
 }
 
 func (of *openFile) ReadAt(p []byte, off int64) (int, error) {
-	of.wg.Add(1)
-	defer of.wg.Done()
-	return of.f.ReadAt(p, off)
+	r, err := of.c.getReaderAt(of.key)
+	if err != nil {
+		return 0, err
+	}
+	defer of.c.releaseReaderAt(of.key)
+	return r.ReadAt(p, off)
 }
-func (of *openFile) Close() error {
-	of.once.Do(of.closeCallback)
-	// wait asynchronously so slow ReadAt call serving other client won't
-	// block Close call done in context of this client
-	go func() { of.wg.Wait(); of.f.Close() }()
-	return nil
+
+type fileRef struct {
+	*os.File
+	cnt int // usage count
 }
 
 // ptyRequestDimensions parses "pty-req" request payload as specified in
