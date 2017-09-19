@@ -4,7 +4,8 @@ This repository holds set of tools to automate file deployments:
 
 * [deploy-registry](#deploy-registry) — server storing files and required metadata;
 * [deploy-agent](#deploy-agent) — agent program running on server(s) and tracking single configuration against registry;
-* [deployctl](#deployctl) — tool to manage state of configurations stored in registry and uploading files to it.
+* [deployctl](#deployctl) — tool to manage state of configurations stored in registry and uploading files to it;
+* [deploy-from-docker](https://github.com/artyom/deploy-tools/blob/master/cmd/deploy-from-docker/README.md) — an **experimental** tool that allows creating configurations directly from the docker images.
 
 ## Key concepts
 
