@@ -83,6 +83,11 @@ func run(args *runArgs) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, c := range layers {
+			c.Close()
+		}
+	}()
 	if args.Name != "" {
 		name = args.Name
 	}
@@ -94,7 +99,7 @@ func run(args *runArgs) error {
 	return uploadAndSwitch(client, name, layers)
 }
 
-func uploadAndSwitch(client *ssh.Client, name string, layers []io.Reader) error {
+func uploadAndSwitch(client *ssh.Client, name string, layers []io.ReadCloser) error {
 	if name == "" {
 		return errors.New("empty name")
 	}
@@ -242,7 +247,7 @@ func readKey(name string) (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(privateBytes)
 }
 
-func repack(input io.Reader) (string, []io.Reader, error) {
+func repack(input io.Reader) (string, []io.ReadCloser, error) {
 	tr := tar.NewReader(input)
 	layers := make(map[string]*os.File)
 	var name string
@@ -261,11 +266,11 @@ func repack(input io.Reader) (string, []io.Reader, error) {
 			if err := fillSkips(layers, mlayers); err != nil {
 				return "", nil, err
 			}
-			ret := make([]io.Reader, 0, len(mlayers))
+			ret := make([]io.ReadCloser, 0, len(mlayers))
 			defer func() { // make sure to unblock io.PipeWriters
 				if !happyPath {
 					for _, c := range ret {
-						c.(io.Closer).Close()
+						c.Close()
 					}
 				}
 			}()
@@ -301,13 +306,14 @@ func repack(input io.Reader) (string, []io.Reader, error) {
 	}
 }
 
-func restream(input io.Reader, skip map[string]struct{}) io.Reader {
+func restream(input io.ReadCloser, skip map[string]struct{}) io.ReadCloser {
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(copyStream(pw, input, skip)) }()
 	return pr
 }
 
-func copyStream(output io.Writer, input io.Reader, skip map[string]struct{}) error {
+func copyStream(output io.Writer, input io.ReadCloser, skip map[string]struct{}) error {
+	defer input.Close()
 	tr := tar.NewReader(input)
 	tw := tar.NewWriter(output)
 	defer tw.Close()
