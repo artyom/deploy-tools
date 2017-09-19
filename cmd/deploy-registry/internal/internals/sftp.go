@@ -37,7 +37,7 @@ func newUploadHandlers(dir string, callback func(name, hash string)) sftp.Handle
 		FileGet:  h,
 		FilePut:  h,
 		FileCmd:  h,
-		FileInfo: h,
+		FileList: h,
 	}
 }
 
@@ -46,48 +46,48 @@ type uploadHandler struct {
 	callback func(name, hash string)
 }
 
-func (h *uploadHandler) Filecmd(r sftp.Request) error                   { return syscall.EPERM }
-func (h *uploadHandler) Fileinfo(r sftp.Request) ([]os.FileInfo, error) { return nil, syscall.EPERM }
-func (h *uploadHandler) Fileread(r sftp.Request) (io.ReaderAt, error)   { return nil, syscall.EPERM }
-func (h *uploadHandler) Filewrite(r sftp.Request) (io.WriterAt, error) {
+func (*uploadHandler) Filecmd(*sftp.Request) error                   { return syscall.EPERM }
+func (*uploadHandler) Filelist(*sftp.Request) (sftp.ListerAt, error) { return nil, syscall.EPERM }
+func (*uploadHandler) Fileread(*sftp.Request) (io.ReaderAt, error)   { return nil, syscall.EPERM }
+func (h *uploadHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	return newWriterAt(h.uploads, h.callback)
 }
 
 // NewDownloadServer returns read-only sftp.RequestServer that processes get
 // requests with provided FileReadFunc and list, stat, readlink requests using
-// provided FileInfoFunc.
-func NewDownloadServer(rwc io.ReadWriteCloser, ifn FileInfoFunc, rfn FileReadFunc) *sftp.RequestServer {
+// provided FileListerFunc.
+func NewDownloadServer(rwc io.ReadWriteCloser, ifn FileListerFunc, rfn FileReadFunc) *sftp.RequestServer {
 	return sftp.NewRequestServer(rwc, newDownloadHandlers(ifn, rfn))
 }
 
-func newDownloadHandlers(ifn FileInfoFunc, rfn FileReadFunc) sftp.Handlers {
+func newDownloadHandlers(ifn FileListerFunc, rfn FileReadFunc) sftp.Handlers {
 	h := &downloadHandler{
-		fileInfoFunc: ifn,
-		fileReadFunc: rfn,
+		fileListerFunc: ifn,
+		fileReadFunc:   rfn,
 	}
 	return sftp.Handlers{
 		FileGet:  h,
 		FilePut:  h,
 		FileCmd:  h,
-		FileInfo: h,
+		FileList: h,
 	}
 }
 
 type downloadHandler struct {
-	fileInfoFunc FileInfoFunc
-	fileReadFunc FileReadFunc
+	fileListerFunc FileListerFunc
+	fileReadFunc   FileReadFunc
 }
 
-func (h *downloadHandler) Filecmd(r sftp.Request) error                   { return syscall.EPERM }
-func (h *downloadHandler) Fileinfo(r sftp.Request) ([]os.FileInfo, error) { return h.fileInfoFunc(r) }
-func (h *downloadHandler) Fileread(r sftp.Request) (io.ReaderAt, error)   { return h.fileReadFunc(r) }
-func (h *downloadHandler) Filewrite(r sftp.Request) (io.WriterAt, error)  { return nil, syscall.EPERM }
+func (*downloadHandler) Filecmd(*sftp.Request) error                       { return syscall.EPERM }
+func (h *downloadHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) { return h.fileListerFunc(r) }
+func (h *downloadHandler) Fileread(r *sftp.Request) (io.ReaderAt, error)   { return h.fileReadFunc(r) }
+func (*downloadHandler) Filewrite(*sftp.Request) (io.WriterAt, error)      { return nil, syscall.EPERM }
 
-// FileInfoFunc is a function from sftp.FileInfoer interface
-type FileInfoFunc func(sftp.Request) ([]os.FileInfo, error)
+// FileListerFunc is a function from sftp.FileLister interface
+type FileListerFunc func(*sftp.Request) (sftp.ListerAt, error)
 
 // FileReadFunc is a function from sftp.FileReader interface
-type FileReadFunc func(sftp.Request) (io.ReaderAt, error)
+type FileReadFunc func(*sftp.Request) (io.ReaderAt, error)
 
 // newWriterAt creates temporary file in a given directory and returns
 // io.WriterAt which also implements io.Closer, which calculates file sha256

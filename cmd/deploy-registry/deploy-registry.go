@@ -151,7 +151,7 @@ func handleServiceSession(sshCh ssh.Channel, requests <-chan *ssh.Request, tr *t
 		}
 		go func() {
 			defer sshCh.Close() // SSH_MSG_CHANNEL_CLOSE
-			s := internals.NewDownloadServer(sshCh, tr.fileInfoFunc, tr.fileReadFunc)
+			s := internals.NewDownloadServer(sshCh, tr.fileListerFunc, tr.fileReadFunc)
 			_ = s.Serve()
 		}()
 		req.Reply(true, nil)
@@ -243,17 +243,18 @@ func (tr *tracker) uploadCallback(name, hash string) {
 	tr.uploads[hash] = name
 }
 
-func (tr *tracker) fileInfoFunc(r sftp.Request) ([]os.FileInfo, error) {
+func (tr *tracker) fileListerFunc(r *sftp.Request) (sftp.ListerAt, error) {
 	switch r.Method {
 	case "List":
-		return tr.listDirs(r.Filepath)
+		out, err := tr.listDirs(r.Filepath)
+		return internals.Listerat(out), err
 	case "Stat":
 		var out []os.FileInfo
 		st, err := tr.statPath(r.Filepath)
 		if st != nil {
 			out = []os.FileInfo{st}
 		}
-		return out, err
+		return internals.Listerat(out), err
 	}
 	return nil, syscall.EPERM // TODO
 }
@@ -353,7 +354,7 @@ func (tr *tracker) releaseReaderAt(base string) {
 	r.cnt--
 }
 
-func (tr *tracker) fileReadFunc(r sftp.Request) (io.ReaderAt, error) {
+func (tr *tracker) fileReadFunc(r *sftp.Request) (io.ReaderAt, error) {
 	rPath := path.Clean(r.Filepath)
 	for _, pat := range []string{"/files/?*", "files/?*"} {
 		if ok, err := path.Match(pat, rPath); ok && err == nil {
