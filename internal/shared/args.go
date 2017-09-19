@@ -55,8 +55,8 @@ func (a *ArgsDelConfiguration) Validate() error {
 
 // ArgsAddConfiguration describes arguments to configuratin add command
 type ArgsAddConfiguration struct {
-	Name   string       `flag:"name,configuration name"`
-	Layers compVerSlice `flag:"layer,layer in component:version format; can be set multiple times"`
+	Name   string     `flag:"name,configuration name"`
+	Layers LayersList `flag:"layer,layer in component:version format; can be set multiple times"`
 }
 
 // Validate checks arguments sanity
@@ -188,11 +188,13 @@ type compVer struct {
 	Comp, Ver string
 }
 
-// compVerSlice implements flag.Value interface
-type compVerSlice []compVer
+func (c compVer) String() string { return c.Comp + ":" + c.Ver }
 
-func (c *compVerSlice) String() string { return "" }
-func (c *compVerSlice) Set(value string) error {
+// LayersList implements flag.Value interface
+type LayersList []compVer
+
+func (c *LayersList) String() string { return "" }
+func (c *LayersList) Set(value string) error {
 	flds := strings.SplitN(value, ":", 2)
 	if len(flds) != 2 {
 		return errors.New("invalid value")

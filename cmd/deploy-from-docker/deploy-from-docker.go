@@ -29,6 +29,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/artyom/autoflags"
+	"github.com/artyom/deploy-tools/internal/shared"
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
 )
@@ -96,10 +97,10 @@ func run(args *runArgs) error {
 		return err
 	}
 	defer cclose()
-	return uploadAndSwitch(client, name, layers)
+	return uploadAndSwitch(client, name, layers, args.More)
 }
 
-func uploadAndSwitch(client *ssh.Client, name string, layers []io.ReadCloser) error {
+func uploadAndSwitch(client *ssh.Client, name string, layers []io.ReadCloser, more shared.LayersList) error {
 	if name == "" {
 		return errors.New("empty name")
 	}
@@ -127,9 +128,12 @@ func uploadAndSwitch(client *ssh.Client, name string, layers []io.ReadCloser) er
 		}
 		components = append(components, lname+":"+hash)
 	}
-	cmdArgs := make([]string, 0, 2+len(components))
+	cmdArgs := make([]string, 0, 2+len(components)+len(more))
 	cmdArgs = append(cmdArgs, "addconf", fmt.Sprintf("-name=%q", name))
 	for _, s := range components {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("-layer=%q", s))
+	}
+	for _, s := range more {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("-layer=%q", s))
 	}
 	session, err := client.NewSession()
@@ -226,6 +230,8 @@ type runArgs struct {
 	Fp   string `flag:"fp,$DEPLOYCTL_FINGERPRINT, sha256 host key fingerprint (sha256:...)"`
 	Key  string `flag:"key,ssh private key to use; if not set, ssh-agent is used"`
 	Name string `flag:"name,configuration name; derived from docker image tag if not set"`
+
+	More shared.LayersList `flag:"layer,extra layers to add on top of imported, component:version format; can be set multiple times"`
 }
 
 func (a *runArgs) Validate() error {
