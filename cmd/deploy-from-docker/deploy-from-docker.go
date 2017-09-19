@@ -173,7 +173,10 @@ func upload(client *ssh.Client, src io.Reader) ([]byte, error) {
 	}
 	defer dst.Close()
 	h := sha256.New()
-	gw := gzip.NewWriter(io.MultiWriter(dst, h))
+	gw, err := gzip.NewWriterLevel(io.MultiWriter(dst, h), gzip.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := io.Copy(gw, src); err != nil {
 		return nil, errors.WithMessage(err, "upload failure")
 	}
