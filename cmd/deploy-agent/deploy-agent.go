@@ -151,7 +151,7 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 		return err
 	}
 	if args.Verbose {
-		log.Println("switched to new configuration:", newState.Hash)
+		log.Println("switched to the new configuration:", newState.Hash)
 	}
 	if args.CleanOld {
 		if err := cleanUnpacked(filepath.Join(args.Dir, unpackedDir), newState.Hash); err != nil {
