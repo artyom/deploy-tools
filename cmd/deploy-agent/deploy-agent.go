@@ -265,7 +265,11 @@ func saveStateTemp(dir string, mode os.FileMode, state *configuration) (string, 
 }
 
 func saveState(dst string, mode os.FileMode, state *configuration) error {
-	f, err := ioutil.TempFile(filepath.Dir(dst), "temp-state-")
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	f, err := ioutil.TempFile(dir, "temp-state-")
 	if err != nil {
 		return err
 	}
