@@ -1,0 +1,15 @@
+github.com/artyom/autoflags v1.1.0 h1:Cz3qb/qSkhmt/Zgsu3D/HwMJtKYUSV5kctI6O9bekv4=
+github.com/artyom/isterm v0.0.0-20160311194710-f88d4bd7134f h1:zGQJHKTZwt5Wg3eqXaocjPprYxpAiAXcIW8i3xrzyIw=
+github.com/artyom/logger v0.0.0-20170228124418-866fc605019a h1:3o85Z6X/2FOZ1gfm6oYd+JE1XFdkKmk8CLFXYsjuxAI=
+github.com/artyom/progress v0.0.0-20170307164810-4902a424a102 h1:ajPTno+IpxdpxXcAXXe2oGVK54v0DKD//nL0r1Q/Osw=
+github.com/artyom/untar v0.0.0-20160228112026-02ed5a2449a6 h1:gH8IKwVAJNti0pGoYzqZPFrlDNFA4PGiqHyWJ+0QYiE=
+github.com/boltdb/bolt v1.3.1 h1:JQmyP4ZBrce+ZQu0dY660FMfatumYDLun9hBCUVIkF4=
+github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
+github.com/kr/fs v0.0.0-20131111012553-2788f0dbd169 h1:YUrU1/jxRqnt0PSrKj1Uj/wEjk/fjnE80QFfi2Zlj7Q=
+github.com/mattn/go-shellwords v1.0.3 h1:K/VxK7SZ+cvuPgFSLKi5QPI9Vr/ipOf4C1gN+ntueUk=
+github.com/pkg/errors v0.8.0 h1:WdK/asTD0HN+q6hsWO3/vpuAkAr+tw6aNJNDFFf0+qw=
+github.com/pkg/sftp v0.0.0-20170823214620-98203f5a8333 h1:H+TrkEzdC/n/788nNAOg8j658hMbHOzSfALxhvq90Fo=
+github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+github.com/stretchr/testify v1.2.1 h1:52QO5WkIUcHGIR7EnGagH88x1bUzqGXTC5/1bDTUQ7U=
+golang.org/x/crypto v0.0.0-20170916190215-7d9177d70076 h1:ad4PRCeV38+3Gr78OjYx+YUmcDWn99Tgcbk8b6C8aQs=
+golang.org/x/sys v0.0.0-20170919001338-b6e1ae216436 h1:mHN22bCMWcJYbAlJRRLY49GcmklNR2cfAHuOg7/RjKo=
