@@ -1170,6 +1170,7 @@ func (tr *tracker) handleBumpConfiguration(w io.Writer, rawArgs []string) error 
 	if err := args.Validate(); err != nil {
 		return err
 	}
+	var prev ComponentVersion // layer version we're replacing
 	fn := func(tx *bolt.Tx) error {
 		cv, err := getTxComponentLatestVersion(tx, args.Comp)
 		if err != nil {
@@ -1179,12 +1180,26 @@ func (tr *tracker) handleBumpConfiguration(w io.Writer, rawArgs []string) error 
 		if err != nil {
 			return err
 		}
+		for _, cv2 := range cfg.Layers {
+			if cv2.Name == cv.Name && cv2.Version != cv.Version {
+				prev = *cv2
+				break
+			}
+		}
 		if err := cfg.replaceLayer(cv); err != nil {
 			return err
 		}
 		return cfg.save(tx)
 	}
-	return multiUpdate(tr.db, fn)
+	if err := multiUpdate(tr.db, fn); err != nil {
+		return err
+	}
+	if prev.Name == "" || prev.Version == "" {
+		return nil
+	}
+	fmt.Fprintf(w, "to roll back run:\n\tchangeconf -name=%q -component=%q -version=%q\n",
+		args.Name, prev.Name, prev.Version)
+	return nil
 }
 
 func (tr *tracker) handleUpdateConfiguration(w io.Writer, rawArgs []string) error {
