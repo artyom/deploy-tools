@@ -129,10 +129,12 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 		return nil
 	}
 	if args.Verbose {
-		log.Println("configuration update available:", newState.Hash)
+		var b strings.Builder
+		fmt.Fprintln(&b, "configuration update available:", newState.Hash)
 		for i, l := range newState.Layers {
-			log.Printf("\tcomponent %d: %q, version: %q", i+1, l.Name, l.Version)
+			fmt.Fprintf(&b, "\tcomponent %d: %q, version: %q\n", i+1, l.Name, l.Version)
 		}
+		log.Println(b)
 	}
 	if err := downloadMissing(ctx, sconn, filepath.Join(args.Dir, cacheDir), newState.Layers); err != nil {
 		return err
