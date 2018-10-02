@@ -134,7 +134,7 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 		for i, l := range newState.Layers {
 			fmt.Fprintf(&b, "\tcomponent %d: %q, version: %q\n", i+1, l.Name, l.Version)
 		}
-		log.Println(b)
+		log.Println(b.String())
 	}
 	if err := downloadMissing(ctx, sconn, filepath.Join(args.Dir, cacheDir), newState.Layers); err != nil {
 		return err
