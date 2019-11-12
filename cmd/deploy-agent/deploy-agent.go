@@ -130,9 +130,9 @@ func cycle(ctx context.Context, args *mainArgs, cfg *ssh.ClientConfig, log logge
 	}
 	if args.Verbose {
 		var b strings.Builder
-		fmt.Fprintln(&b, "configuration update available:", newState.Hash)
+		fmt.Fprint(&b, "configuration update available: ", newState.Hash)
 		for i, l := range newState.Layers {
-			fmt.Fprintf(&b, "\tcomponent %d: %q, version: %q\n", i+1, l.Name, l.Version)
+			fmt.Fprintf(&b, "\n\tcomponent %d: %q, version: %q", i+1, l.Name, l.Version)
 		}
 		log.Println(b.String())
 	}
