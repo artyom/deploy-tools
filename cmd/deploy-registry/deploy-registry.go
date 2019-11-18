@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path"
@@ -42,6 +43,7 @@ func main() {
 		SrvAuth:      "/etc/deploy-registry/service.keys",
 		KeepVersions: 10,
 		Deadline:     30 * time.Minute,
+		WebAPI:       os.Getenv("HTTPAPI"),
 	}
 	autoflags.Parse(&args)
 	if err := run(args); err != nil {
@@ -54,6 +56,8 @@ type runConf struct {
 	Dir     string `flag:"dir,data directory"`
 	OpAuth  string `flag:"opauth,authorized_keys for operators"`
 	SrvAuth string `flag:"srvauth,authorized_keys for services"`
+
+	WebAPI string `flag:"http,experimental http API (no authorization, so must be on localhost)"`
 
 	KeepVersions int           `flag:"maxver,max.number of component versions to keep"`
 	Deadline     time.Duration `flag:"deadline,max.lifetime of TCP connection"`
@@ -83,6 +87,21 @@ func run(args runConf) error {
 		return err
 	}
 	defer tr.Close()
+
+	if args.WebAPI != "" {
+		if !(strings.HasPrefix(args.WebAPI, "localhost:") || strings.HasPrefix(args.WebAPI, "127.0.0.1:")) {
+			return errors.New("http API has no authorization and should only be exposed on localhost")
+		}
+		srv := &http.Server{
+			Addr:         args.WebAPI,
+			Handler:      tr,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		}
+		go func() {
+			log.Println("http api listen:", srv.ListenAndServe())
+		}()
+	}
 
 	ln, err := net.Listen("tcp", args.Addr)
 	if err != nil {
