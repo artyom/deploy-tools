@@ -1,7 +1,7 @@
 module github.com/artyom/deploy-tools
 
 require (
-	github.com/artyom/autoflags v1.1.0
+	github.com/artyom/autoflags v1.1.1
 	github.com/artyom/isterm v0.0.0-20160311194710-f88d4bd7134f
 	github.com/artyom/logger v1.0.0
 	github.com/artyom/progress v0.0.0-20170307164810-4902a424a102
