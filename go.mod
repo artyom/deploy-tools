@@ -9,7 +9,7 @@ require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/kr/fs v0.1.0 // indirect
-	github.com/mattn/go-shellwords v1.0.3
+	github.com/mattn/go-shellwords v1.0.9
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.11.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
